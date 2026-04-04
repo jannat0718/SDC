@@ -1,0 +1,7 @@
+person
+speed_20
+speed_30
+stop
+traffic_green_light
+traffic_red_light
+turn_left
