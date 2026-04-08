@@ -1,0 +1,5 @@
+numpy>=1.24
+opencv-python>=4.8
+rplidar-roboticia>=0.9
+onnxruntime>=1.16
+python-can>=4.3
