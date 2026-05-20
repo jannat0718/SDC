@@ -1,0 +1,7 @@
+data/
+.vscode/
+venv/
+*.pyc
+__pycache__/
+Output/
+Model/best_openvino_model-20260401T075819Z-3-001/
