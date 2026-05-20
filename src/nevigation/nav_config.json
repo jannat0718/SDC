@@ -1,0 +1,323 @@
+{
+  "_comment": "Navigation config \u2014 SDC 2026 Track (9360x1410 image)",
+  "scale_factor": 0.067,
+  "camera_height_m": 0.5,
+  "lidar_angle_offset": 180.0,
+  "map_world_range_m": 50.0,
+  "track_image_path": "/home/jannat/sdc_2026/src/nevigation/Track.png",
+  "_homography_comment": "9360x1410px = 452.46x68.16m. Scale=20.6869 px/m. Origin=start line (7823,720). Kart faces LEFT.",
+  "start_px": [
+    7823,
+    720
+  ],
+  "px_per_meter": 20.6869,
+  "world_pts": [
+    [
+      -378.162,
+      34.805
+    ],
+    [
+      74.298,
+      34.805
+    ],
+    [
+      74.298,
+      -33.355
+    ],
+    [
+      -378.162,
+      -33.355
+    ]
+  ],
+  "image_pts": [
+    [
+      0,
+      0
+    ],
+    [
+      9359,
+      0
+    ],
+    [
+      9359,
+      1409
+    ],
+    [
+      0,
+      1409
+    ]
+  ],
+  "_track_info": {
+    "image_w_px": 9360,
+    "image_h_px": 1410,
+    "real_width_m": 452.46,
+    "real_height_m": 68.16,
+    "start_pixel": [
+      7823,
+      720
+    ],
+    "end_pixel": [
+      7741,
+      764
+    ],
+    "kart_heading_at_start": "LEFT (negative X)",
+    "initial_heading_rad": 3.14159,
+    "px_per_meter": 20.6869,
+    "meters_per_pixel": 0.0483398
+  },
+  "_fixed_landmarks_comment": "Pixel coords on 9360x1410 Track.png. World coords = metres from start line. Used for localization verification and drift correction.",
+  "fixed_landmarks": [
+    {
+      "name": "starting_line",
+      "pixel_box": {
+        "x_min": 6684,
+        "x_max": 6690,
+        "y_min": 572,
+        "y_max": 656
+      },
+      "pixel_center": [
+        6687,
+        614
+      ],
+      "world_center": [
+        -52.014,
+        5.124
+      ],
+      "world_tl": [
+        -54.962,
+        7.154
+      ],
+      "world_br": [
+        -49.065,
+        3.094
+      ],
+      "size_m": [
+        5.9,
+        4.06
+      ],
+      "color_bgr": [
+        0,
+        255,
+        0
+      ],
+      "type": "line",
+      "note": "Start/finish line \u2014 primary pose reset point"
+    },
+    {
+      "name": "end_line",
+      "pixel_box": {
+        "x_min": 6684,
+        "x_max": 6690,
+        "y_min": 871,
+        "y_max": 957
+      },
+      "pixel_center": [
+        6687,
+        914
+      ],
+      "world_center": [
+        -52.014,
+        -9.378
+      ],
+      "world_tl": [
+        -54.962,
+        -7.299
+      ],
+      "world_br": [
+        -49.065,
+        -11.457
+      ],
+      "size_m": [
+        5.9,
+        4.16
+      ],
+      "color_bgr": [
+        0,
+        200,
+        0
+      ],
+      "type": "line",
+      "note": "End line"
+    },
+    {
+      "name": "zebra_1",
+      "pixel_box": {
+        "x_min": 3449,
+        "x_max": 3571,
+        "y_min": 573,
+        "y_max": 656
+      },
+      "pixel_center": [
+        3510,
+        614
+      ],
+      "world_center": [
+        -208.489,
+        5.124
+      ],
+      "world_tl": [
+        -211.438,
+        7.106
+      ],
+      "world_br": [
+        -205.541,
+        3.094
+      ],
+      "size_m": [
+        5.9,
+        4.01
+      ],
+      "color_bgr": [
+        0,
+        255,
+        255
+      ],
+      "type": "zebra",
+      "note": "Zebra crossing 1 \u2014 upper lane"
+    },
+    {
+      "name": "zebra_2",
+      "pixel_box": {
+        "x_min": 1770,
+        "x_max": 1890,
+        "y_min": 302,
+        "y_max": 389
+      },
+      "pixel_center": [
+        1830,
+        345
+      ],
+      "world_center": [
+        -289.7,
+        18.127
+      ],
+      "world_tl": [
+        -292.601,
+        20.206
+      ],
+      "world_br": [
+        -286.8,
+        16.0
+      ],
+      "size_m": [
+        5.8,
+        4.21
+      ],
+      "color_bgr": [
+        0,
+        200,
+        255
+      ],
+      "type": "zebra",
+      "note": "Zebra crossing 2"
+    },
+    {
+      "name": "zebra_3",
+      "pixel_box": {
+        "x_min": 1334,
+        "x_max": 1457,
+        "y_min": 782,
+        "y_max": 960
+      },
+      "pixel_center": [
+        1395,
+        871
+      ],
+      "world_center": [
+        -310.728,
+        -7.299
+      ],
+      "world_tl": [
+        -313.677,
+        -2.997
+      ],
+      "world_br": [
+        -307.731,
+        -11.602
+      ],
+      "size_m": [
+        5.95,
+        8.6
+      ],
+      "color_bgr": [
+        0,
+        165,
+        255
+      ],
+      "type": "zebra",
+      "note": "Zebra crossing 3 \u2014 lower lane"
+    },
+    {
+      "name": "zebra_4",
+      "pixel_box": {
+        "x_min": 3449,
+        "x_max": 3571,
+        "y_min": 871,
+        "y_max": 959
+      },
+      "pixel_center": [
+        3510,
+        915
+      ],
+      "world_center": [
+        -208.489,
+        -9.426
+      ],
+      "world_tl": [
+        -211.438,
+        -7.299
+      ],
+      "world_br": [
+        -205.541,
+        -11.553
+      ],
+      "size_m": [
+        5.9,
+        4.25
+      ],
+      "color_bgr": [
+        255,
+        165,
+        0
+      ],
+      "type": "zebra",
+      "note": "Zebra crossing 4 \u2014 lower lane"
+    },
+    {
+      "name": "start_point",
+      "pixel_center": [
+        6687,
+        615
+      ],
+      "world_center": [
+        -54.914,
+        5.076
+      ],
+      "color_bgr": [
+        0,
+        255,
+        0
+      ],
+      "type": "point",
+      "note": "Kart start position (single point)"
+    },
+    {
+      "name": "end_point",
+      "pixel_center": [
+        6687,
+        915
+      ],
+      "world_center": [
+        -54.914,
+        -9.426
+      ],
+      "color_bgr": [
+        0,
+        180,
+        0
+      ],
+      "type": "point",
+      "note": "Kart end position (single point)"
+    }
+  ]
+}
