@@ -1,6 +1,7 @@
 r"""
 av_map.py - Navigation Map System
 ===================================
+
 Modules:
   1. CameraCalibration   - auto-loads K from camera_K.json
   2. VisualOdometry      - Lucas-Kanade + Essential Matrix -> pose (x, y, heading)
@@ -50,13 +51,18 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from nevigation.utils import load_camera_params, load_nav_config, CameraParams, NavConfig
+from nevigation.utils import load_camera_params, load_nav_config, load_nav_config_merged, CameraParams, NavConfig
 from nevigation.landmark_localizer import LandmarkLocalizer
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 CALIB_PATH  = os.path.join(os.path.dirname(__file__), "camera_K.json")
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "nav_config.json")
-OUTPUT_DIR  = "/home/jannat/sdc_2026/Output"
+# All output artefacts (map_final.png, snap_*.png, nav_preview.jpg, manual map
+# saves) land in <project>/logs/.  Callers can override the location by setting
+# VO_SDC_OUTPUT_DIR before importing this module (test_map_video.py does this).
+_DEFAULT_OUTPUT_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "logs"))
+OUTPUT_DIR  = os.environ.get("VO_SDC_OUTPUT_DIR", _DEFAULT_OUTPUT_DIR)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Preview JPG path — open in Windows Explorer, press F5 to refresh
@@ -70,7 +76,6 @@ PALETTE = [
     (128, 0, 255),
 ]
 
-
 # ─────────────────────────────────────────────
 # DATA STRUCTURES
 # ─────────────────────────────────────────────
@@ -79,7 +84,8 @@ PALETTE = [
 class Pose:
     x:       float = 0.0
     y:       float = 0.0
-    heading: float = math.pi/2          # radians
+    #heading: float = math.pi/2     
+    heading: float = 0.0     # radians
     R: np.ndarray = field(default_factory=lambda: np.eye(3))
     t: np.ndarray = field(default_factory=lambda: np.zeros((3, 1)))
 
@@ -91,7 +97,6 @@ class DetectedObject:
     world_x:  float = 0.0
     world_y:  float = 0.0
     class_id: int   = 0
-
 
 # ─────────────────────────────────────────────
 # MODULE 1 — CAMERA CALIBRATION LOADER
@@ -128,7 +133,6 @@ class CameraCalibration:
     def undistort(self, frame: np.ndarray) -> np.ndarray:
         return cv2.undistort(frame, self.K, self.dist)
 
-
 # ─────────────────────────────────────────────
 # MODULE 2 — VISUAL ODOMETRY
 # ─────────────────────────────────────────────
@@ -153,8 +157,10 @@ class VisualOdometry:
     """
 
     def __init__(self, K: np.ndarray, scale_factor: float = 0.05,
-                 max_heading_rate_deg: float = 5.0,
-                 lateral_scale: float = 0.02):
+                 max_heading_rate_deg: float = 2.0,
+                 lateral_scale: float = 0.02,
+                 feature_detector=None):
+        from nevigation.feature_detectors import make_detector
         self.K     = K
         self.scale_factor      = scale_factor
         self.lateral_scale     = lateral_scale
@@ -163,29 +169,70 @@ class VisualOdometry:
             winSize=(21, 21), maxLevel=3,
             criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01)
         )
-        self.orb = cv2.ORB_create(nfeatures=2000)
+        self.detector   = make_detector(feature_detector)   # ORB or GFTT
         self.pose       = Pose()
         self.trajectory = [(0.0, 0.0)]
         self._R_cum     = np.eye(3)            # cumulative rotation (camera→world)
         self._prev_gray = None
         self._prev_pts  = None
         self._frame_num = 0
+        self._road_mask = None
+        self.n_features = 0
+        print(f"[VO] feature detector = {self.detector.name}  "
+              f"max_heading_rate = {max_heading_rate_deg}°/frame")
 
-    def reset(self):
-        self.pose       = Pose()
-        self.pose.heading = math.pi / 2   # restore correct initial heading
-        self._R_cum     = np.eye(3)
-        self.trajectory = [(self.pose.x, self.pose.y)]  # keep current position
+    def reset(self, heading: float = None):
+        """Reset VO tracking buffers. Preserves kart position and heading.
+
+        Only the optical-flow state (_prev_gray, _prev_pts) is truly reset.
+        X, Y, and heading are preserved — the kart didn't teleport or spin
+        just because tracking was briefly lost.
+
+        Args:
+            heading: Override heading (radians). If None, keeps current heading.
+        """
+        h        = heading if heading is not None else self.pose.heading
+        saved_x  = self.pose.x
+        saved_y  = self.pose.y
+
+        self.pose           = Pose()
+        self.pose.x         = saved_x          # restore position
+        self.pose.y         = saved_y
+        self.pose.heading   = h                # restore / override heading
+
+        # Reseed _R_cum consistent with heading h.
+        # heading = raw_yaw + π/2  →  raw_yaw = h - π/2
+        # Do NOT use np.eye(3) — identity encodes VO-neutral = 90°.
+        _raw = h - math.pi / 2
+        _c, _s = math.cos(_raw), math.sin(_raw)
+        self._R_cum = np.array([[_c, 0, _s], [0, 1, 0], [-_s, 0, _c]])
+
+        self.trajectory = [(saved_x, saved_y)]
         self._prev_gray = None
         self._prev_pts  = None
-        print("[VO] Pose reset.")
+        print(f"[VO] reset — heading={math.degrees(h):.1f}°  pos=({saved_x:.2f},{saved_y:.2f})")
 
     def _detect(self, gray: np.ndarray) -> np.ndarray:
-        kps = self.orb.detect(gray, None)
-        if not kps:
-            return np.array([])
-        return np.array([kp.pt for kp in kps],
-                        dtype=np.float32).reshape(-1, 1, 2)
+        if self._road_mask is None or self._road_mask.shape != gray.shape:
+            self._road_mask = self._build_road_mask(gray.shape)
+        return self.detector.detect(gray, mask=self._road_mask)
+
+    @staticmethod
+    def _build_road_mask(shape: tuple, top_skip: float = 0.35,
+                         side_skip: float = 0.10) -> np.ndarray:
+        """Restrict feature detection to the road surface.
+
+        Excludes the top `top_skip` fraction (sky/horizon) and the outer
+         `side_skip` fraction on each side. Returns uint8 mask where 
+        255 = look here, 0 = ignore.
+        """
+        h, w = shape
+        mask = np.zeros((h, w), dtype=np.uint8)
+        y0 = int(h * top_skip)
+        x0 = int(w * side_skip)
+        x1 = int(w * (1.0 - side_skip))
+        mask[y0:, x0:x1] = 255
+        return mask
 
     @staticmethod
     def _clamp_rotation_yaw_only(R: np.ndarray, max_yaw: float) -> np.ndarray:
@@ -227,6 +274,12 @@ class VisualOdometry:
 
         _, R_inc, t, _ = cv2.recoverPose(E, good_curr, good_prev, self.K, mask=mask)
 
+        # Suppress heading change when forward motion is weak.
+        # recoverPose always returns unit-norm t; |t[2]|<0.3 means the kart
+        # is mostly stopped or moving sideways → heading measurement is noise.
+        if abs(float(t[2])) < 0.3:
+            R_inc = np.eye(3)
+
         # 1. Clamp incremental rotation
         R_inc = self._clamp_rotation_yaw_only(R_inc, self.max_heading_rate)
 
@@ -265,6 +318,7 @@ class VisualOdometry:
         self._prev_pts  = good_curr.reshape(-1, 1, 2) if len(good_curr) > 150 \
                           else self._detect(gray)
         self._prev_gray = gray
+        self.n_features = len(good_curr)   # exposed for pipeline diagnostics
         return self.pose
 
     def speed_kmh(self, prev_pose: Pose, dt: float) -> float:
@@ -272,7 +326,9 @@ class VisualOdometry:
             return 0.0
         dx = self.pose.x - prev_pose.x
         dy = self.pose.y - prev_pose.y
-        return round((math.sqrt(dx*dx + dy*dy) / dt) * 3.6, 1)# ─────────────────────────────────────────────
+        return round((math.sqrt(dx*dx + dy*dy) / dt) * 3.6, 1)
+
+# ─────────────────────────────────────────────
 # MODULE 3 — OBJECT PROJECTOR
 # ─────────────────────────────────────────────
 
@@ -327,7 +383,6 @@ class ObjectProjector:
         obj.world_x = float(world_pt[0]) + pose.x
         obj.world_y = float(world_pt[2]) + pose.y
         return obj
-
 
 # ─────────────────────────────────────────────
 # MODULE 4 — HOMOGRAPHY HELPER
@@ -429,35 +484,50 @@ class TrackMapper:
     def __init__(self, cfg: NavConfig, map_size: tuple = (800, 800)):
         self.map_w, self.map_h = map_size
         self.world_range = cfg.map_world_range_m
-        self.scale = min(self.map_w, self.map_h) / self.world_range
-        self.origin_x = self.map_w // 2
-        self.origin_y = self.map_h // 2
         self.H: Optional[np.ndarray] = None
 
-        # Load track image
+        # ── Load track image (read once; derive scale factors for everything) ──
+        orig_img_w, orig_img_h = self.map_w, self.map_h   # fallback if no image
         if cfg.track_image_path and os.path.exists(cfg.track_image_path):
-            img = cv2.imread(cfg.track_image_path)
-            self.track_bg = cv2.resize(img, (self.map_w, self.map_h))
+            _img = cv2.imread(cfg.track_image_path)
+            orig_img_h, orig_img_w = _img.shape[:2]
+            self.track_bg = cv2.resize(_img, (self.map_w, self.map_h))
             print(f"[TrackMapper] Loaded track image: {cfg.track_image_path}")
         else:
             print(f"[TrackMapper] Track image not found at '{cfg.track_image_path}' — using grid map.")
             print(f"  Set 'track_image_path' in nav_config.json when ready.")
             self.track_bg = self._make_grid()
 
-        # Load homography if available
+        # Scale factors: full-res image coords → display map coords
+        sx = self.map_w / orig_img_w
+        sy = self.map_h / orig_img_h
+
+        # ── World-origin pixel ────────────────────────────────────────────────
+        # Use cfg.start_px (the pixel on Track.png that corresponds to world (0,0)).
+        # Scale it to the display map. Fall back to map centre if not set.
+        if cfg.start_px and (cfg.start_px[0] != 0 or cfg.start_px[1] != 0):
+            self.origin_x = int(cfg.start_px[0] * sx)
+            self.origin_y = int(cfg.start_px[1] * sy)
+            self.scale    = cfg.px_per_meter * sx   # px/m at display resolution
+            print(f"[TrackMapper] origin=({self.origin_x},{self.origin_y})px  "
+                  f"scale={self.scale:.2f}px/m  (cfg.start_px={cfg.start_px})")
+        else:
+            self.scale    = min(self.map_w, self.map_h) / self.world_range
+            self.origin_x = self.map_w // 2
+            self.origin_y = self.map_h // 2
+            print(f"[TrackMapper] origin=map-centre ({self.origin_x},{self.origin_y})px  "
+                  f"(no start_px in config — fallback)")
+
+        # ── Homography (image_pts are in full-res coords; scale them) ─────────
         if cfg.world_pts and cfg.image_pts:
             wp = np.float32(cfg.world_pts)
             ip = np.float32(cfg.image_pts)
-            # Scale image_pts to map display size if track image was resized
-            if cfg.track_image_path and os.path.exists(cfg.track_image_path):
-                orig = cv2.imread(cfg.track_image_path)
-                oh, ow = orig.shape[:2]
-                ip[:, 0] *= self.map_w / ow
-                ip[:, 1] *= self.map_h / oh
+            ip[:, 0] *= sx
+            ip[:, 1] *= sy
             self.H, _ = cv2.findHomography(wp, ip)
             print("[TrackMapper] Homography loaded from config.")
         else:
-            print("[TrackMapper] No homography — run --calibrate-homography for accurate overlay.")
+            print("[TrackMapper] No homography — using scaled pixel-origin fallback.")
 
     def world_to_pixel(self, wx: float, wy: float) -> tuple:
         if self.H is not None:
@@ -474,13 +544,13 @@ class TrackMapper:
 
         frame = self.track_bg.copy()
 
-        # Trajectory trail (fading green)
+        # Trajectory trail (fading red→orange — anti-grass color)
         if len(trajectory) > 1:
-            pts = [self.world_to_pixel(x, y) for x, y in trajectory[-500:]]
+            pts = [self.world_to_pixel(x, y) for x, y in trajectory]
             for i in range(1, len(pts)):
                 alpha = i / len(pts)
                 c = int(80 + 160 * alpha)
-                cv2.line(frame, pts[i-1], pts[i], (0, c, 0), 2)
+                cv2.line(frame, pts[i-1], pts[i], (0, c, 255), 3)
 
         # Detected objects
         for obj in objects:
@@ -528,7 +598,6 @@ class TrackMapper:
         cv2.line(img, (self.origin_x, 0), (self.origin_x, self.map_h), (70,70,70), 2)
         cv2.line(img, (0, self.origin_y), (self.map_w, self.origin_y),  (70,70,70), 2)
         return img
-
 
 # ─────────────────────────────────────────────
 # MODULE 6 — MAP SYSTEM (Main Loop)
@@ -701,7 +770,6 @@ class MapSystem:
                 print(f"[MapSystem] Final map saved → {fname}")
             print("[MapSystem] Stopped.")
 
-
 # ─────────────────────────────────────────────
 # NAVIGATION PIPELINE — main integration class
 # ─────────────────────────────────────────────
@@ -728,15 +796,28 @@ class NavigationPipeline:
     def __init__(self, mode: str = "video",
                  video_path: Optional[str] = None,
                  check_points: list = None,
-                 frame_callback=None):
+                 frame_callback=None,
+                 feature_detector=None,
+                 config_path: Optional[str] = None,
+                 calib_path: Optional[str] = None,
+                 start_pixel: Optional[list] = None,
+                 initial_heading_rad: Optional[float] = None,
+                 start_frame: Optional[int] = None,
+                 end_frame: Optional[int] = None):
 
         from nevigation.perception import GroundPlaneProjector, ObjectTracker
         from nevigation.av_system  import ObjectDetector, MODEL_XML, CLASSES_PATH
-        import json as _json
+
+        # Allow per-run overrides; default to the module-level constants so
+        # existing callers are unaffected.
+        _cfg_path   = config_path or CONFIG_PATH
+        _calib_path = calib_path  or CALIB_PATH
 
         self.mode         = mode
         self.check_points = check_points or []
         self.frame_callback = frame_callback
+        self.start_frame  = start_frame
+        self.end_frame    = end_frame
 
         # Public state attributes – updated every frame for the callback
         self.frame_count      = 0
@@ -745,15 +826,31 @@ class NavigationPipeline:
         self.kart_heading     = 0.0   # degrees
         self.stopped          = False
         self.detected_objects = []
+        self.snap_events      = []    # list of dicts: {frame, name, world_x, world_y}
+        self.start_time            = time.time()
+        # VO health — updated each frame after vo.update()
+        self.vo_last_features      = 0
+        self.vo_last_dx_m          = 0.0
+        self.vo_last_dy_m          = 0.0
+        self.vo_last_dheading_deg  = 0.0
+        # Snap event — set by snap handler each frame (None if no snap occurred)
+        self.last_snap             = None
 
         print("\n" + "="*60)
         print("  Navigation Pipeline — starting")
         print("="*60)
 
-        self.calib = CameraCalibration(CALIB_PATH)
-        self.cfg = load_nav_config(CONFIG_PATH)
-        with open(CONFIG_PATH) as f:
-            self.cfg_raw = _json.load(f)
+        self.calib = CameraCalibration(_calib_path)
+        self.cfg_raw = load_nav_config_merged(_cfg_path)
+        # caller/CLI overrides (highest priority)
+        if start_pixel is not None:
+            self.cfg_raw.setdefault("track_info", {})["start_pixel"] = list(start_pixel)
+        if initial_heading_rad is not None:
+            self.cfg_raw["initial_heading_rad"] = float(initial_heading_rad)
+        self.cfg = NavConfig(self.cfg_raw)
+        _src = self.cfg_raw.get("_per_video_source")
+        if _src:
+            print(f"[Config] per-video override: {_src}")
 
         self.px_per_m  = self.cfg_raw["px_per_meter"]
         self.start_px  = self.cfg_raw["start_px"]
@@ -764,8 +861,9 @@ class NavigationPipeline:
             px, py = cp["track_pixel"]
             wx = (px - self.start_px[0]) / self.px_per_m
             wy = -(py - self.start_px[1]) / self.px_per_m
-            cp["world"] = (round(wx, 3), round(wy, 3))
-            cp["hit"]   = False
+            cp["world"]     = (round(wx, 3), round(wy, 3))
+            cp["hit"]       = False
+            cp["closest_m"] = float("inf")
         print(f"\nCheck points ({len(self.check_points)}):")
         for cp in self.check_points:
             print(f"  {cp['name']:<16} track_px={cp['track_pixel']}  "
@@ -773,6 +871,7 @@ class NavigationPipeline:
 
         # ── Open video / camera ───────────────────────────────────────
         if mode == "video":
+            video_path = video_path or self.cfg_raw.get("video_path")
             if not video_path or not os.path.exists(video_path):
                 raise FileNotFoundError(f"Video not found: {video_path}")
             self.cap     = cv2.VideoCapture(video_path)
@@ -811,21 +910,37 @@ class NavigationPipeline:
               f"Scaling: x={scale_x:.3f} y={scale_y:.3f}")
 
         # ── Init VO ──────────────────────────────────────────────────
-        self.vo = VisualOdometry(self.calib.K, scale_factor=self.cfg.scale_factor)
+        self.vo = VisualOdometry(self.calib.K,
+                                 scale_factor=self.cfg.scale_factor,
+                                 feature_detector=feature_detector)
 
-        # Seed VO origin to test video start position
-        # kart_start track pixel (1681,686) → world (-296.903, 1.644)
-        self.vo.pose.x       = -297.001
-        self.vo.pose.y       =  -0.396
-        self.vo.pose.heading =  math.pi / 2   # 90° = facing +Y (upward on map)
-        self.vo.trajectory   = [(-297.001, -0.396)]
+        # Seed VO start pose from nav_config track_info.start_pixel + world origin
+        _sp  = self.cfg_raw["track_info"]["start_pixel"]   # e.g. [1320, 915]
+        _ox  = self.start_px                                # e.g. [6795, 270]
+        _h0  = self.cfg_raw.get("initial_heading_rad", 0.0)   # 0 = facing +X right; fallback was π/2 (wrong)
 
+        start_wx =  (_sp[0] - _ox[0]) / self.px_per_m
+        start_wy = -(_sp[1] - _ox[1]) / self.px_per_m
+
+        self.vo.pose.x       = start_wx
+        self.vo.pose.y       = start_wy
+        self.vo.pose.heading = _h0
+        self.vo.trajectory   = [(start_wx, start_wy)]
+
+        # Seed _R_cum so VO heading is consistent with _h0.
+        # VO computes heading = raw_yaw + π/2, so raw_yaw = _h0 - π/2.
+        _raw_yaw = _h0 - math.pi / 2
+        _c, _s = math.cos(_raw_yaw), math.sin(_raw_yaw)
+        self.vo._R_cum = np.array([[_c, 0, _s], [0, 1, 0], [-_s, 0, _c]])
+
+        print(f"[Pipeline] VO seeded: pos=({start_wx:.3f}, {start_wy:.3f})m  "
+              f"heading={math.degrees(_h0):.1f}°")
 
         # ── Init perception ──────────────────────────────────────────
         self.projector = GroundPlaneProjector(
             fx=self.calib.cam.fx, fy=self.calib.cam.fy,
             cx=self.calib.cam.cx, cy=self.calib.cam.cy,
-            camera_height_m=0.4572      # 1.5 feet
+            camera_height_m=self.cfg.camera_height_m   # from nav_config (measured)
         )
         self.tracker = ObjectTracker(self.projector)
 
@@ -868,6 +983,17 @@ class NavigationPipeline:
         print(f"\nPreview  → {PREVIEW_FILE}")
         print(f"Commands : q=quit  r=reset  s=save\n")
 
+    # ── Track-map scale helpers ───────────────────────────────────────────
+    # Verified against zebra_3 pixel_box (123x178 px ≈ 400x592 cm) → 30 px/m.
+    # Track.png is a top-down map at a uniform scale, so 1 px = (1/px_per_m) m.
+    def track_px_to_m(self, dist_px: float) -> float:
+        """Convert a distance in track-map pixels to metres."""
+        return dist_px / self.px_per_m
+
+    def track_m_to_px(self, dist_m: float) -> float:
+        """Convert a distance in metres to track-map pixels."""
+        return dist_m * self.px_per_m
+
     # ── Main loop ─────────────────────────────────────────────────────────
     def run(self):
         import time as _t
@@ -889,6 +1015,16 @@ class NavigationPipeline:
                     break
 
                 frame_num += 1
+
+                # Skip frames before start_frame
+                if self.start_frame is not None and frame_num < self.start_frame:
+                    continue
+
+                # Stop after end_frame
+                if self.end_frame is not None and frame_num > self.end_frame:
+                    print(f"\nReached end frame {self.end_frame}.")
+                    break
+
                 now = _t.time()
                 frame_ud = self.calib.undistort(frame)
 
@@ -899,27 +1035,93 @@ class NavigationPipeline:
                 if not self.tracker.is_kart_stopped():
                     pose = self.vo.update(frame_ud)
                 else:
+                    _saved_x, _saved_y = self.vo.pose.x, self.vo.pose.y
+                    _saved_heading = float(pose.heading)  # Save as scalar BEFORE vo.update() aliases it
                     _ = self.vo.update(frame_ud)          # run to refresh features for next movement
-                    self.vo.pose.heading = pose.heading   # restore heading after VO noise
+                    # Restore BOTH heading and position — VO ran but kart didn't actually move
+                    self.vo.pose.heading = _saved_heading  # Now actually restores pre-VO heading
+                    self.vo.pose.x       = _saved_x
+                    self.vo.pose.y       = _saved_y
+                    # Re-seed _R_cum to stay consistent with the frozen heading.
+                    # Without this, _R_cum diverges from pose.heading during stopped frames,
+                    # causing a heading jump when movement resumes.
+                    _h = _saved_heading                    # Seeds _R_cum from true saved heading
+                    _raw = _h - math.pi / 2
+                    _c, _s = math.cos(_raw), math.sin(_raw)
+                    self.vo._R_cum = np.array([[_c, 0, _s], [0, 1, 0], [-_s, 0, _c]])
                     pose = self.vo.pose
+
+                # Capture VO health for logger
+                _prev_heading = getattr(self, '_prev_heading', self.vo.pose.heading)
+                self.vo_last_features     = self.vo.n_features
+                self.vo_last_dx_m         = self.vo.pose.x - prev_x
+                self.vo_last_dy_m         = self.vo.pose.y - prev_y
+                self.vo_last_dheading_deg = math.degrees(self.vo.pose.heading - _prev_heading)
+                self._prev_heading        = self.vo.pose.heading
 
                 # ── Landmark snap (drift correction) ─────────────────
                 # If we see a known zebra/start-line and VO says we're close
                 # to it, overwrite VO (x,y) with the landmark's world_center.
+                _MAX_SNAP_M = 3.0
+                self.last_snap = None   # reset each frame
+                pre_x, pre_y = self.vo.pose.x, self.vo.pose.y
+                pre_hdg = math.degrees(self.vo.pose.heading)
+
                 snap = self.localizer.process(frame_ud, self.vo.pose)
                 if snap is not None:
-                    print(f"[Snap] {snap.landmark_name}  "
-                          f"VO=({self.vo.pose.x:.2f},{self.vo.pose.y:.2f}) -> "
-                          f"({snap.world_x:.2f},{snap.world_y:.2f})  conf={snap.confidence:.2f}")
-                    self.vo.pose.x = snap.world_x
-                    self.vo.pose.y = snap.world_y
-                    if snap.heading_rad is not None:
-                        self.vo.pose.heading = snap.heading_rad
-                    # Re-anchor trajectory so the corrected jump doesn't
-                    # render as a wild line on the map.
-                    self.vo.trajectory.append((snap.world_x, snap.world_y))
-                    pose = self.vo.pose
-
+                    snap_dist = math.hypot(snap.world_x - pre_x, snap.world_y - pre_y)
+                    if snap_dist > _MAX_SNAP_M:
+                        print(f"[Snap REJECTED] {snap.landmark_name}  "
+                              f"distance={snap_dist:.1f}m > {_MAX_SNAP_M}m threshold")
+                        self.last_snap = {
+                            "name": snap.landmark_name,
+                            "type": getattr(snap, "landmark_type", ""),
+                            "dist_m": snap_dist, "conf": snap.confidence,
+                            "pre_x": pre_x, "pre_y": pre_y,
+                            "post_x": pre_x, "post_y": pre_y,
+                            "pre_hdg": pre_hdg, "post_hdg": pre_hdg, "dhdg": 0.0,
+                            "accepted": False,
+                            "reject_reason": f"dist {snap_dist:.1f}m > {_MAX_SNAP_M}m",
+                        }
+                    else:
+                        post_hdg = pre_hdg
+                        print(f"[Snap] {snap.landmark_name}  "
+                              f"VO=({pre_x:.2f},{pre_y:.2f}) -> "
+                              f"({snap.world_x:.2f},{snap.world_y:.2f})  "
+                              f"dist={snap_dist:.2f}m  conf={snap.confidence:.2f}")
+                        self.vo.pose.x = snap.world_x
+                        self.vo.pose.y = snap.world_y
+                        if snap.heading_rad is not None:
+                            self.vo.pose.heading = snap.heading_rad
+                            post_hdg = math.degrees(snap.heading_rad)
+                        # Reseed _R_cum from the current (preserved) heading so future frames
+                        # continue in the correct direction.
+                        # DO NOT use np.eye(3) — identity encodes heading=90° (VO neutral),
+                        # corrupting the heading on the very next frame.
+                        _h = self.vo.pose.heading
+                        _raw = _h - math.pi / 2
+                        _c, _s = math.cos(_raw), math.sin(_raw)
+                        self.vo._R_cum = np.array([[_c, 0, _s], [0, 1, 0], [-_s, 0, _c]])
+                        # Re-anchor trajectory so the corrected jump doesn't
+                        # render as a wild line on the map.
+                        self.vo.trajectory.append((snap.world_x, snap.world_y))
+                        pose = self.vo.pose
+                        self.last_snap = {
+                            "name": snap.landmark_name,
+                            "type": getattr(snap, "landmark_type", ""),
+                            "dist_m": snap_dist, "conf": snap.confidence,
+                            "pre_x": pre_x, "pre_y": pre_y,
+                            "post_x": snap.world_x, "post_y": snap.world_y,
+                            "pre_hdg": pre_hdg, "post_hdg": post_hdg,
+                            "dhdg": post_hdg - pre_hdg,
+                            "accepted": True, "reject_reason": "",
+                        }
+                        self.snap_events.append({
+                            "frame":   frame_num,
+                            "name":    snap.landmark_name,
+                            "world_x": snap.world_x,
+                            "world_y": snap.world_y,
+                        })
 
                 # Speed
                 dt    = max(now - prev_t, 1e-6)
@@ -934,11 +1136,12 @@ class NavigationPipeline:
 
                 # ── Detect objects ────────────────────────────────────
                 raw_dets = self.detector.detect(frame_ud)
-                self.detector.draw(frame_ud, raw_dets)
+                frame_display = frame_ud.copy()                 # Separate display buffer
+                self.detector.draw(frame_display, raw_dets)     # Only draws on the copy
 
                 # ── Track + project objects (perception.py) ───────────
                 visible_objs = self.tracker.update(
-                    raw_dets, pose.x, pose.y, pose.heading, frame_ud)
+                    raw_dets, pose.x, pose.y, pose.heading, frame_display)
 
                 # ── Check point matching ──────────────────────────────
                 self._check_points(pose, frame_num)
@@ -960,7 +1163,7 @@ class NavigationPipeline:
                     fps = fps_cnt/(now-fps_t)
                     fps_t, fps_cnt = now, 0
 
-                cv2.putText(frame_ud,
+                cv2.putText(frame_display,
                     f"FPS:{fps:.0f} SPD:{speed:.1f}km/h "
                     f"Pos:({pose.x:.1f},{pose.y:.1f})m "
                     f"{'STOPPED' if self.tracker.is_kart_stopped() else 'MOVING'}",
@@ -970,7 +1173,7 @@ class NavigationPipeline:
                 # ── Render track map ──────────────────────────────────
                 if now - last_save >= 1.0:
                     map_frame = self._render_map(pose, visible_objs, speed)
-                    cam_s = cv2.resize(frame_ud, (1280, 720))
+                    cam_s = cv2.resize(frame_display, (1280, 720))
                     map_s = cv2.resize(map_frame, (1280, int(self.MAP_H * 1280/self.MAP_W)))
                     cv2.imwrite(PREVIEW_FILE, np.vstack([cam_s, map_s]))
                     last_save = now
@@ -1002,14 +1205,23 @@ class NavigationPipeline:
     def _render_map(self, pose, visible_objs, speed):
         frame = self._landmark_base.copy()
 
-        # Trajectory
+        # Trajectory — fading red→orange, full path, 3 px so it shows on the green map
         if len(self.vo.trajectory) > 1:
-            pts = [self.mapper.world_to_pixel(x, y) for x, y in self.vo.trajectory[-500:]]
+            pts = [self.mapper.world_to_pixel(x, y) for x, y in self.vo.trajectory]
             for i in range(1, len(pts)):
                 if (0 <= pts[i-1][0] < self.MAP_W and 0 <= pts[i-1][1] < self.MAP_H
                         and 0 <= pts[i][0] < self.MAP_W and 0 <= pts[i][1] < self.MAP_H):
                     a = i / len(pts)
-                    cv2.line(frame, pts[i-1], pts[i], (0, int(80 + 160 * a), 0), 2)
+                    cv2.line(frame, pts[i-1], pts[i], (0, int(80 + 160 * a), 255), 3)
+
+        # Snap correction markers (yellow stars)
+        for ev in self.snap_events:
+            ex, ey = self.mapper.world_to_pixel(ev["world_x"], ev["world_y"])
+            if 0 <= ex < self.MAP_W and 0 <= ey < self.MAP_H:
+                cv2.drawMarker(frame, (ex, ey), (0, 255, 255),
+                               cv2.MARKER_STAR, 22, 3)
+                cv2.putText(frame, f"snap:{ev['name']}", (ex + 14, ey + 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
 
         # Detected objects
         for obj in visible_objs:
@@ -1078,10 +1290,12 @@ class NavigationPipeline:
 
     def _check_points(self, pose, frame_num):
         for cp in self.check_points:
-            if cp["hit"]:
-                continue
             wx, wy = cp["world"]
             dist = math.sqrt((pose.x - wx) ** 2 + (pose.y - wy) ** 2)
+            if dist < cp["closest_m"]:
+                cp["closest_m"] = dist
+            if cp["hit"]:
+                continue
             if dist <= cp["threshold_m"]:
                 cp["hit"] = True
                 print(f"\n  *** CHECK POINT HIT: {cp['name']} ***")
@@ -1139,7 +1353,6 @@ def main():
         video_path=video_path if args.mode == "video" else None,
     )
     system.run()
-
 
 if __name__ == "__main__":
     main()
