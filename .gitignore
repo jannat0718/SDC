@@ -5,3 +5,10 @@ venv/
 __pycache__/
 Output/
 Model/best_openvino_model-20260401T075819Z-3-001/
+
+# Windows/WSL Zone.Identifier metadata files
+*:Zone.Identifier
+*Zone.Identifier
+
+# Image files
+*.png
