@@ -12,3 +12,8 @@ Model/best_openvino_model-20260401T075819Z-3-001/
 
 # Image files
 *.png
+
+# Excel/CSV files
+*.xlsx
+*.xls
+*.csv
