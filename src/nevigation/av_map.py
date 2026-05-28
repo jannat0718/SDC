@@ -157,7 +157,7 @@ class VisualOdometry:
     """
 
     def __init__(self, K: np.ndarray, scale_factor: float = 0.05,
-                 max_heading_rate_deg: float = 2.0,
+                 max_heading_rate_deg: float = 1.0,
                  lateral_scale: float = 0.02,
                  feature_detector=None):
         from nevigation.feature_detectors import make_detector
@@ -295,13 +295,6 @@ class VisualOdometry:
             self.pose.heading += 2 * math.pi
 
         self.pose.R = self._R_cum.copy()
-
-        # --- Heading drift correction: gently pull toward 180° ---
-        # Prevents long-term Y drift by keeping heading aligned to track forward
-        #target_heading = math.pi           # 180° (negative X direction)
-        #error = (target_heading - self.pose.heading + math.pi) % (2 * math.pi) - math.pi
-        #correction = error * 0.02          # pull 2% of the error per frame
-        #self.pose.heading = (self.pose.heading + correction) % (2 * math.pi)
 
         # 3. Local translation with separate lateral scale
         step_forward = float(t[2]) * self.scale_factor   # camera forward
@@ -544,13 +537,11 @@ class TrackMapper:
 
         frame = self.track_bg.copy()
 
-        # Trajectory trail (fading red→orange — anti-grass color)
+        # Trajectory trail — navy blue
         if len(trajectory) > 1:
             pts = [self.world_to_pixel(x, y) for x, y in trajectory]
             for i in range(1, len(pts)):
-                alpha = i / len(pts)
-                c = int(80 + 160 * alpha)
-                cv2.line(frame, pts[i-1], pts[i], (0, c, 255), 3)
+                cv2.line(frame, pts[i-1], pts[i], (128, 0, 0), 3)
 
         # Detected objects
         for obj in objects:
@@ -564,15 +555,15 @@ class TrackMapper:
                         (px + 11, py + 4),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1, cv2.LINE_AA)
 
-        # Kart icon — filled circle + heading arrow
+        # Kart icon — filled circle + heading arrow, deep red
         kx, ky = self.world_to_pixel(pose.x, pose.y)
         if 0 <= kx < self.map_w and 0 <= py < self.map_h:
             ex = int(kx + 22 * np.sin(pose.heading))
             ey = int(ky - 22 * np.cos(pose.heading))
-            cv2.circle(frame, (kx, ky), 11, (0, 255, 0), -1)
-            cv2.circle(frame, (kx, ky), 11, (0, 180, 0), 2)
+            cv2.circle(frame, (kx, ky), 11, (0, 0, 139), -1)
+            cv2.circle(frame, (kx, ky), 11, (0, 0, 80), 2)
             cv2.arrowedLine(frame, (kx, ky), (ex, ey),
-                            (0, 255, 0), 3, tipLength=0.4)
+                            (0, 0, 139), 3, tipLength=0.4)
 
         # HUD
         hud = [
@@ -581,10 +572,10 @@ class TrackMapper:
             f"Spd : {speed_kmh:.1f} km/h",
             f"Obj : {len(objects)}",
         ]
-        cv2.rectangle(frame, (0, 0), (230, 20 + len(hud)*22), (0, 0, 0), -1)
+        cv2.rectangle(frame, (0, 0), (270, 16 + len(hud)*26), (0, 0, 0), -1)
         for i, line in enumerate(hud):
-            cv2.putText(frame, line, (6, 18 + i*22),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (200, 255, 200), 1, cv2.LINE_AA)
+            cv2.putText(frame, line, (8, 22 + i*26),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.62, (255, 255, 255), 1, cv2.LINE_AA)
 
         return frame
 
@@ -917,7 +908,11 @@ class NavigationPipeline:
         # Seed VO start pose from nav_config track_info.start_pixel + world origin
         _sp  = self.cfg_raw["track_info"]["start_pixel"]   # e.g. [1320, 915]
         _ox  = self.start_px                                # e.g. [6795, 270]
-        _h0  = self.cfg_raw.get("initial_heading_rad", 0.0)   # 0 = facing +X right; fallback was π/2 (wrong)
+        if "initial_heading_rad" not in self.cfg_raw:
+            raise KeyError(
+                "initial_heading_rad missing from config — "
+                "set to 0.0 (+X, video) or 3.14159265 (-X, real-time)")
+        _h0  = float(self.cfg_raw["initial_heading_rad"])
 
         start_wx =  (_sp[0] - _ox[0]) / self.px_per_m
         start_wy = -(_sp[1] - _ox[1]) / self.px_per_m
@@ -1123,6 +1118,26 @@ class NavigationPipeline:
                             "world_y": snap.world_y,
                         })
 
+                # Proximity snap — triggers on position alone (no visual needed)
+                prox_snap = self.localizer.check_proximity_snaps(self.vo.pose)
+                if prox_snap is not None:
+                    self.vo.pose.x = prox_snap.world_x
+                    self.vo.pose.y = prox_snap.world_y
+                    if prox_snap.heading_rad is not None:
+                        self.vo.pose.heading = prox_snap.heading_rad
+                    _h = self.vo.pose.heading
+                    _raw = _h - math.pi / 2
+                    _c, _s = math.cos(_raw), math.sin(_raw)
+                    self.vo._R_cum = np.array([[_c, 0, _s], [0, 1, 0], [-_s, 0, _c]])
+                    self.vo.trajectory.append((prox_snap.world_x, prox_snap.world_y))
+                    pose = self.vo.pose
+                    self.snap_events.append({
+                        "frame":   frame_num,
+                        "name":    prox_snap.landmark_name,
+                        "world_x": prox_snap.world_x,
+                        "world_y": prox_snap.world_y,
+                    })
+
                 # Speed
                 dt    = max(now - prev_t, 1e-6)
                 dx, dy = pose.x-prev_x, pose.y-prev_y
@@ -1167,8 +1182,8 @@ class NavigationPipeline:
                     f"FPS:{fps:.0f} SPD:{speed:.1f}km/h "
                     f"Pos:({pose.x:.1f},{pose.y:.1f})m "
                     f"{'STOPPED' if self.tracker.is_kart_stopped() else 'MOVING'}",
-                    (10,28), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6, (0,255,0), 2)
+                    (10,28), cv2.FONT_HERSHEY_DUPLEX,
+                    0.65, (0, 0, 0), 2)
 
                 # ── Render track map ──────────────────────────────────
                 if now - last_save >= 1.0:
@@ -1205,14 +1220,13 @@ class NavigationPipeline:
     def _render_map(self, pose, visible_objs, speed):
         frame = self._landmark_base.copy()
 
-        # Trajectory — fading red→orange, full path, 3 px so it shows on the green map
+        # Trajectory — navy blue, full path
         if len(self.vo.trajectory) > 1:
             pts = [self.mapper.world_to_pixel(x, y) for x, y in self.vo.trajectory]
             for i in range(1, len(pts)):
                 if (0 <= pts[i-1][0] < self.MAP_W and 0 <= pts[i-1][1] < self.MAP_H
                         and 0 <= pts[i][0] < self.MAP_W and 0 <= pts[i][1] < self.MAP_H):
-                    a = i / len(pts)
-                    cv2.line(frame, pts[i-1], pts[i], (0, int(80 + 160 * a), 255), 3)
+                    cv2.line(frame, pts[i-1], pts[i], (128, 0, 0), 3)
 
         # Snap correction markers (yellow stars)
         for ev in self.snap_events:
@@ -1241,24 +1255,26 @@ class NavigationPipeline:
             cv2.putText(frame, cp["name"], (px+12, py),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1)
 
-        # Kart icon
+        # Kart icon — deep red
         kx, ky = self.mapper.world_to_pixel(pose.x, pose.y)
         if 0 <= kx < self.MAP_W and 0 <= ky < self.MAP_H:
             ex = int(kx + 20 * math.cos(pose.heading))
             ey = int(ky - 20 * math.sin(pose.heading))
-            cv2.circle(frame, (kx, ky), 12, (0, 255, 0), -1)
-            cv2.circle(frame, (kx, ky), 12, (0, 180, 0), 2)
-            cv2.arrowedLine(frame, (kx, ky), (ex, ey), (0, 255, 0), 3, tipLength=0.4)
+            cv2.circle(frame, (kx, ky), 12, (0, 0, 139), -1)
+            cv2.circle(frame, (kx, ky), 12, (0, 0, 80), 2)
+            cv2.arrowedLine(frame, (kx, ky), (ex, ey), (0, 0, 139), 3, tipLength=0.4)
 
-        # HUD
-        hud = np.full((50, self.MAP_W, 3), 25, dtype=np.uint8)
-        info = (f"Pos:({pose.x:.1f},{pose.y:.1f})m  "
-                f"Hdg:{math.degrees(pose.heading):.0f}°  "
-                f"Spd:{speed:.1f}km/h  "
-                f"Obj:{len(visible_objs)}  "
-                f"{'STOPPED' if self.tracker.is_kart_stopped() else 'MOVING'}")
-        cv2.putText(hud, info, (10, 33),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 255, 180), 1)
+        # HUD — dark bar with white text, split into two lines for readability
+        hud = np.full((60, self.MAP_W, 3), 20, dtype=np.uint8)
+        line1 = (f"Pos: ({pose.x:.1f}, {pose.y:.1f}) m    "
+                 f"Hdg: {math.degrees(pose.heading):.0f} deg")
+        line2 = (f"Speed: {speed:.1f} km/h    "
+                 f"Obj: {len(visible_objs)}    "
+                 f"{'STOPPED' if self.tracker.is_kart_stopped() else 'MOVING'}")
+        cv2.putText(hud, line1, (10, 22),
+                    cv2.FONT_HERSHEY_DUPLEX, 0.65, (255, 255, 255), 1, cv2.LINE_AA)
+        cv2.putText(hud, line2, (10, 48),
+                    cv2.FONT_HERSHEY_DUPLEX, 0.65, (255, 255, 255), 1, cv2.LINE_AA)
         return np.vstack([frame, hud])
 
     def _draw_landmarks(self, img):
