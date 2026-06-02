@@ -35,10 +35,26 @@ import numpy as np
 # Read-only imports. Both modules have no module-level mutable state and we
 # never assign back into them.
 from nevigation.av_map import (
+
     VisualOdometry, CameraCalibration, TrackMapper, Pose
 )
 from nevigation.landmark_localizer import LandmarkLocalizer
 from nevigation.utils import load_nav_config_merged, NavConfig
+
+# --- track-mask soft constraint (optional) ---
+try:
+    from nevigation.track_constraint import load_from_nav_config
+    from nevigation.track_aiding import soft_track_pull
+    _TRACK_AIDING_AVAILABLE = True
+except ImportError:
+    try:
+        # fallback: if track_constraint/track_aiding live in the same dir
+        # rather than under the nevigation package
+        from track_constraint import load_from_nav_config
+        from track_aiding import soft_track_pull
+        _TRACK_AIDING_AVAILABLE = True
+    except ImportError:
+        _TRACK_AIDING_AVAILABLE = False
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -369,6 +385,19 @@ class KFPipeline:
         self.start_frame = start_frame
         self.end_frame = end_frame
 
+        # --- track-mask aiding (optional, fails silently if files missing) ---
+        self.track = None
+        self._track_R_m_sq = float(self.cfg_raw.get('track_constraint_R_m_sq', 0.25))
+        self._track_max_pull_m = float(self.cfg_raw.get('track_constraint_max_pull_m', 5.0))
+        if _TRACK_AIDING_AVAILABLE and self.cfg_raw.get('use_track_mask', True):
+            try:
+                self.track = load_from_nav_config(self.cfg_raw)
+                print(f"[KFPipeline] Track mask aiding ENABLED "
+                      f"(R={self._track_R_m_sq:.4f}, max_pull={self._track_max_pull_m:.1f}m)")
+            except Exception as e:
+                print(f"[KFPipeline] Track mask aiding DISABLED ({type(e).__name__}: {e})")
+                self.track = None
+
     # ── world<->pixel helpers ────────────────────────────────────────────
     def world_to_pixel(self, wx: float, wy: float) -> tuple:
         u = int(self.world_origin_px[0] + wx * self.px_per_m)
@@ -518,6 +547,21 @@ class KFPipeline:
                     print(f"[F{frame_num:04d}] PROX snap '{prox.landmark_name}' "
                           f"pre={snap_info['pre_xyz']} "
                           f"post={snap_info['post_xyz']}")
+
+                # --- track-mask soft pull (gentle correction back to drivable area) ---
+                if self.track is not None:
+                    pull = soft_track_pull(
+                        self.ekf.state, self.track,
+                        R_track_m_sq=self._track_R_m_sq,
+                        max_pull_dist_m=self._track_max_pull_m,
+                    )
+                    if pull is not None:
+                        zx, zy, _R_eff = pull   # R unused: update_landmark uses R_landmark_xy
+                        snap_info = self.ekf.update_landmark(z_x=zx, z_y=zy)
+                        print(f"[F{frame_num:04d}] track-pull -> "
+                              f"({zx:+.2f},{zy:+.2f})m  "
+                              f"pre={snap_info['pre_xyz']} "
+                              f"post={snap_info['post_xyz']}")
 
                 # Per-frame log row
                 p = self.ekf.pose
