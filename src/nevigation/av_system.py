@@ -1,14 +1,16 @@
 import cv2
 import numpy as np
 from rplidar import RPLidar
-import openvino.runtime as ov
+import openvino as ov
 import threading
 import time
 import os
 
+
 # Suppress Qt font warnings (harmless — Qt fonts not bundled in this venv)
 os.environ["QT_QPA_FONTDIR"] = ""
 os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+
 
 # --- Configuration ---
 CAMERA_INDEX = 0          # confirmed working index
@@ -18,9 +20,13 @@ MAX_DIST     = 4000       # mm — LiDAR max range shown on minimap
 CONF_THRESHOLD = 0.25     # lowered — end2end models output lower raw scores than standard YOLOv8
 NMS_THRESHOLD  = 0.45     # overlap IOU threshold for NMS
 
-# Paths
-MODEL_XML    = "/home/jannat/sdc_2026/Model/best_openvino_model-20260401T075819Z-3-001/best_openvino_model/best.xml"
-CLASSES_PATH = "/home/jannat/sdc_2026/Model/classes.txt"
+
+# Paths — relative to this file (src/nevigation/ → project root is 2 levels up)
+_HERE         = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
+MODEL_XML    = os.path.join(_PROJECT_ROOT, "Model", "best_openvino_model-20260401T075819Z-3-001", "best_openvino_model", "best.xml")
+CLASSES_PATH = os.path.join(_PROJECT_ROOT, "Model", "classes.txt")
+
 
 # Colour palette per class index (BGR)
 PALETTE = [

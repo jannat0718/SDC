@@ -22,11 +22,15 @@ CAN_INTERFACE = 'socketcan'
 CAN_CHANNEL = 'can0'
 CAN_BITRATE = 500000
 SENDING_SPEED = 0.04
-SAVE_DIR = "/home/sdc/SDC.ExampleCode/data/SDC_March_Sessions/DATA/"
-SAVE_DIR_LIDAR = "/home/sdc/SDC.ExampleCode/data/SDC_March_Sessions/DATA/"
-SAVE_DIR_VIDEO = "/home/sdc/SDC.ExampleCode/data/SDC_March_Sessions/DATA/"
-SAVE_DIR_CONTROL = "/home/sdc/SDC.ExampleCode/data/SDC_March_Sessions/DATA/"
+SAVE_DIR = "/home/sdc/Jannat_SDC/Output/"
+SAVE_DIR_LIDAR = "/home/sdc/Jannat_SDC/Output/Lidar"
+SAVE_DIR_VIDEO = "/home/sdc/Jannat_SDC/Output/Video"
+SAVE_DIR_CONTROL = "/home/sdc/Jannat_SDC/Output/Control"
 LIDAR_PORT = '/dev/ttyUSB0'
+
+# Create output directories if they don't exist
+for _d in (SAVE_DIR, SAVE_DIR_LIDAR, SAVE_DIR_VIDEO, SAVE_DIR_CONTROL):
+    os.makedirs(_d, exist_ok=True)
 
 # Official SDC control CAN identifiers
 CONTROL_CAN_IDS = {
@@ -45,9 +49,9 @@ FEEDBACK_CAN_ID_MAP = {
 }
 
 # Input Mapping
-AXIS_LEFT_X = 0
-AXIS_LEFT_TRIGGER = 2
-AXIS_RIGHT_Y = 3
+AXIS_LEFT_Y    = 1   # throttle  (up = forward, down = reverse)
+AXIS_RIGHT_X   = 4   # steering  (left/right)
+AXIS_RIGHT_Y   = 3   # brake     (pull down)
 BTN_B_KILL = 1
 BTN_X_RECORD = 3
 BTN_Y_STOP_REC = 4
@@ -367,6 +371,28 @@ def main():
     cur_brake = 0.0
     cur_gear = 'neutral'
 
+    # Throttle ramp: stick events set a TARGET; this thread steps current_speed
+    # toward it at SPEED_RAMP_PER_MSG per tick so acceleration is smooth.
+    SPEED_RAMP_PER_MSG = 3
+    throttle_state = {"target_speed": 0, "target_gear": 0, "current_speed": 0}
+    ramp_stop = threading.Event()
+
+    def _throttle_ramp_loop():
+        while not ramp_stop.is_set():
+            tgt = throttle_state["target_speed"]
+            cur = throttle_state["current_speed"]
+            if tgt > cur:
+                cur = min(tgt, cur + SPEED_RAMP_PER_MSG)
+            elif tgt < cur:
+                cur = max(tgt, cur - SPEED_RAMP_PER_MSG)
+            throttle_state["current_speed"] = cur
+            throttle_msg.data = [cur, 0, throttle_state["target_gear"], 0, 0, 0, 0, 0]
+            throttle_task.modify_data(throttle_msg)
+            time.sleep(SENDING_SPEED)
+
+    ramp_thread = threading.Thread(target=_throttle_ramp_loop, daemon=True)
+    ramp_thread.start()
+
     print("READY. X: Record | Y: Stop | B: Kill")
 
     try:
@@ -423,39 +449,47 @@ def main():
                         elif number == BTN_B_KILL:
                             if steering_log:
                                 steering_log.close()
+                            ramp_stop.set()
                             recorder.cleanup(); lidar_rec.cleanup(); control_worker.cleanup()
                             can_listener.stop(); steer_task.stop(); throttle_task.stop(); brake_task.stop(); bus.shutdown(); sys.exit(0)
 
                     elif type_ & EVENT_AXIS:
-                        if number == AXIS_LEFT_X:
+                        if number == AXIS_RIGHT_X:
                             cur_steer = round(value / 32767.0, 4)
                             steer_msg.data = list(struct.pack("<f", cur_steer)) + [0]*4
                             steer_task.modify_data(steer_msg)
+                            print(f"STEER={cur_steer:+.2f}  THROTTLE={cur_throttle:+.2f} gear={cur_gear}  BRAKE={cur_brake:.2f}")
                             if steering_log:
                                 steering_log.write(f"{time.time()},steering,{cur_steer},\n")
 
-                        elif number == AXIS_RIGHT_Y:
+                        elif number == AXIS_LEFT_Y:
                             cur_throttle = round(-(value / 32767.0), 4)
                             speed = int(abs(cur_throttle) * 45) if abs(value) > 5000 else 0
                             gear = 1 if cur_throttle > 0.15 else (2 if cur_throttle < -0.15 else 0)
                             cur_gear = {0: 'neutral', 1: 'forward', 2: 'reverse'}[gear]
-                            throttle_msg.data = [speed, 0, gear, 0, 0, 0, 0, 0]
-                            throttle_task.modify_data(throttle_msg)
+                            # Set target for the ramp thread; it sends the CAN msg.
+                            throttle_state["target_speed"] = speed
+                            throttle_state["target_gear"] = gear
+                            print(f"STEER={cur_steer:+.2f}  THROTTLE={cur_throttle:+.2f} target_speed={speed} gear={cur_gear}  BRAKE={cur_brake:.2f}")
                             if steering_log:
                                 steering_log.write(f"{time.time()},throttle,{speed},{gear}\n")
 
-                        elif number == AXIS_LEFT_TRIGGER:
-                            # Left trigger: -32767 (released) to +32767 (fully pressed)
-                            cur_brake = round(max(0, (value + 32767) / 65534.0), 4)
+                        elif number == AXIS_RIGHT_Y:
+                            # Right stick: pull DOWN to brake. Joystick reports
+                            # down as positive value; up is ignored (no brake).
+                            brake_input = max(0, value) / 32767.0
+                            cur_brake = round(brake_input, 4)
                             brake_val = int(cur_brake * 100)
                             brake_msg.data = [brake_val, 0, 0, 0, 0, 0, 0, 0]
                             brake_task.modify_data(brake_msg)
+                            print(f"STEER={cur_steer:+.2f}  THROTTLE={cur_throttle:+.2f} gear={cur_gear}  BRAKE={cur_brake:.2f}")
                             if steering_log:
                                 steering_log.write(f"{time.time()},brake,{cur_brake},\n")
 
     except KeyboardInterrupt:
         if steering_log:
             steering_log.close()
+        ramp_stop.set()
         recorder.cleanup(); lidar_rec.cleanup(); control_worker.cleanup(); can_listener.stop(); bus.shutdown()
 
 if __name__ == "__main__":

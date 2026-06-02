@@ -16,7 +16,7 @@ observation. Disabled by default until BEV homography is validated on track.
 from __future__ import annotations
 import math
 from dataclasses import dataclass
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Callable
 
 import cv2
 import numpy as np
@@ -24,8 +24,8 @@ import numpy as np
 
 # ── Tunables ───────────────────────────────────────────────────────────────
 CAMERA_TO_FRONT_M   = 0.5      # camera is this far behind the kart's front bumper
-SNAP_RADIUS_M       = 15.0     # only snap if VO pose is within this of a landmark
-LOG_EVERY_N_DETECTS = 10       # throttle [Localizer] detection log lines
+SNAP_RADIUS_M       = 8.0     # only snap if VO pose is within this of a landmark
+LOG_EVERY_N_DETECTS = 5       # throttle [Localizer] detection log lines
 LOWER_FRAC          = 0.45     # process bottom 45% of the frame (road region)
 WHITE_THRESHOLD     = 170      # grayscale brightness for "white paint" (tuned for 640x480 compressed video)
 MIN_WHITE_ROW_FRAC  = 0.18     # row counts as bright if >18% of its pixels are white
@@ -35,6 +35,7 @@ LINE_MAX_ANGLE_DEG  = 25       # |angle from horizontal| in image, before warp
 HOUGH_VOTE_THRESH   = 40       # Hough votes (lowered from 60 for 640x480)
 HOUGH_MAX_GAP_PX    = 25       # max gap between collinear segments (raised from 15 for 640x480)
 ZEBRA_CONFIRM_FRAMES = 3       # require N consecutive zebra frames on the same nearest landmark before snapping
+PROXIMITY_RELEASE_FACTOR = 2.0  # asymmetric hysteresis: proximity snap re-arms only when kart is this multiple of snap_radius_m away from the landmark, preventing boundary chatter from re-firing the snap on a kart that drives through a zone
 
 
 @dataclass
@@ -62,7 +63,8 @@ class LandmarkLocalizer:
     def __init__(self,
                  landmarks: List[dict],
                  bev_homography: Optional[np.ndarray] = None,
-                 px_per_meter_bev: Optional[float] = None):
+                 px_per_meter_bev: Optional[float] = None,
+                 snap_gate_fn: Optional[Callable[[float, float, dict], bool]] = None):
         # Snap-eligible landmarks: stripe types (zebra/line) detected visually,
         # plus proximity_snap types triggered by pose distance alone.
         # Point landmarks (yield_triangles, start_point, end_point) are display-only.
@@ -72,6 +74,11 @@ class LandmarkLocalizer:
                                     if lm.get("type") == "proximity_snap"]
         self.H_bev = bev_homography
         self.px_per_m_bev = px_per_meter_bev
+        # Optional pluggable gate: (kart_x, kart_y, landmark_dict) -> accept?
+        # When supplied, replaces the SNAP_RADIUS_M cutoff in process().
+        # Callers that omit it (e.g. the OLD VO pipeline) fall back to the
+        # fixed-radius gate so behaviour stays unchanged.
+        self._snap_gate_fn = snap_gate_fn
         self._last_snap_name: Optional[str] = None
         self._detect_count = 0          # increments every time a stripe is detected
         self._consec_zebra_frames  = 0
@@ -249,12 +256,17 @@ class LandmarkLocalizer:
             wx, wy = lm["world_center"]
             dist = math.hypot(pose.x - wx, pose.y - wy)
             radius = float(lm.get("snap_radius_m", 2.0))
+            release_radius = radius * PROXIMITY_RELEASE_FACTOR
 
-            inside_now = dist <= radius
-
-            if not inside_now:
-                # Kart has left the zone — allow snap again on next entry
+            if dist > release_radius:
+                # Kart is well outside the zone — re-arm for next approach.
                 self._prox_inside.discard(name)
+                continue
+
+            if dist > radius:
+                # Hysteresis band (between snap and release radii): don't
+                # fire, but don't re-arm either. Stops boundary chatter
+                # from re-snapping a kart that has driven through the zone.
                 continue
 
             if name in self._prox_inside:
@@ -265,21 +277,29 @@ class LandmarkLocalizer:
             self._prox_inside.add(name)
             if dist < best_dist:
                 best_dist = dist
-                heading_rad = self._snap_heading_from_candidates(lm, pose.heading)
-                snap_pt = self._get_snap_point(lm, heading_rad)
+                # Proximity snaps correct POSITION only — they fire blindly
+                # based on distance with no image evidence, so forcing a
+                # heading would flip the kart's orientation whenever its
+                # actual direction of travel differs from the landmark's
+                # heading_candidates_rad (e.g. driving east through a snap
+                # configured for north). For snap-point lookup we still need
+                # to pick a snap_points key, so use the prior heading as the
+                # disambiguator; heading_rad is then NOT returned to the
+                # caller.
+                snap_lookup_heading = self._snap_heading_from_candidates(lm, pose.heading)
+                snap_pt = self._get_snap_point(lm, snap_lookup_heading)
                 best_snap = SnapResult(
                     landmark_name=name,
                     world_x=snap_pt[0],
                     world_y=snap_pt[1],
                     confidence=1.0,
-                    heading_rad=heading_rad,
+                    heading_rad=None,   # position-only — never overwrite heading
                 )
 
         if best_snap is not None:
             print(f"[Localizer] PROXIMITY SNAP → {best_snap.landmark_name} "
                   f"pos=({best_snap.world_x:.2f},{best_snap.world_y:.2f}) "
-                  f"hdg={math.degrees(best_snap.heading_rad or 0):.1f}°  "
-                  f"kart_dist={best_dist:.2f}m")
+                  f"(position-only)  kart_dist={best_dist:.2f}m")
 
         return best_snap
 
@@ -326,7 +346,7 @@ class LandmarkLocalizer:
             self._consec_zebra_frames  = 0
             self._consec_landmark_name = None
 
-        # Decide whether to snap.
+        # Decide whether to snap. Checks fire in order; first failure wins.
         suppress_reason = None
         if det["kind"] != "zebra":
             # Single-band "line" detections are too generic (road edges, lane lines).
@@ -334,12 +354,18 @@ class LandmarkLocalizer:
             suppress_reason = f"not_zebra(bands={det['n_bands']})"
         elif lm is None:
             suppress_reason = "no_landmarks"
+        elif self._snap_gate_fn is not None:
+            # Pluggable gate (e.g. Mahalanobis from EKF covariance).
+            if not self._snap_gate_fn(pose.x, pose.y, lm):
+                suppress_reason = f"gate_reject(d={dist_m:.1f}m)"
         elif dist_m > SNAP_RADIUS_M:
+            # Fallback fixed-radius gate when no pluggable gate is supplied.
             suppress_reason = f"out_of_range({dist_m:.1f}>{SNAP_RADIUS_M:.0f}m)"
-        elif self._consec_zebra_frames < ZEBRA_CONFIRM_FRAMES:
+
+        if suppress_reason is None and self._consec_zebra_frames < ZEBRA_CONFIRM_FRAMES:
             suppress_reason = (f"confirming({self._consec_zebra_frames}"
                                f"/{ZEBRA_CONFIRM_FRAMES})")
-        elif lm_name in self._visual_snap_inside:
+        if suppress_reason is None and lm_name in self._visual_snap_inside:
             suppress_reason = f"already_snapped({lm_name})"
 
         # Throttled diagnostic log.
@@ -372,7 +398,11 @@ class LandmarkLocalizer:
         #   heading_candidates_rad field.
         heading_rad: Optional[float] = self._snap_heading_from_candidates(lm, pose.heading)
         if heading_rad is None and self.H_bev is not None:
-            heading_rad = self._heading_from_bev(det, pose.heading)
+            heading_rad = self._heading_from_bev(
+                det,
+                pose.heading,
+                lm.get("world_stripe_angle_rad"),  # None if absent -> returns None
+            )
 
         self._last_snap_name = lm["name"]
         self._visual_snap_inside.add(lm["name"])   # gate: no repeat until stripe gone
@@ -387,16 +417,33 @@ class LandmarkLocalizer:
             confidence=conf,
             heading_rad=heading_rad,
         )
+    
+    def _heading_from_bev(
+        self,
+        det: dict,
+        prior_heading: float,
+        world_stripe_angle_rad: Optional[float],
+    ) -> Optional[float]:
+        """
+        Derive kart heading from a stripe detected in the BEV image.
 
-    def _heading_from_bev(self, det: dict, prior_heading: float) -> Optional[float]:
+        Math contract:
+            kart_heading = world_stripe_angle - stripe_angle_in_bev + pi/2
+        A line has +-pi symmetry, so two candidates exist; this returns the
+        one closer to `prior_heading`.
+
+        Requires:
+            - H_bev configured (BEV homography loaded)
+            - world_stripe_angle_rad supplied (stripe's known world orientation
+              in radians, measured CCW from +X). Returns None if missing -
+              we cannot recover heading without knowing the true stripe
+              orientation in the world.
         """
-        Stripe in BEV is perpendicular to kart travel direction.
-        Heading observation = (stripe_angle_in_bev + 90°) → world frame.
-        Resolves the 180° ambiguity by picking the candidate closest to
-        the VO prior heading. Returns None if BEV is unconfigured.
-        """
+        if world_stripe_angle_rad is None:
+            return None  # Cannot resolve heading without known stripe orientation.
         if self.H_bev is None:
             return None
+            
         # Detect a strong line in the original ROI and warp its endpoints.
         mask = det["mask"]
         edges = cv2.Canny(mask, 50, 150)
@@ -405,6 +452,7 @@ class LandmarkLocalizer:
                                 maxLineGap=HOUGH_MAX_GAP_PX)
         if lines is None:
             return None
+            
         # Pick the longest line.
         best_len, best_line = 0, None
         for x1, y1, x2, y2 in lines[:, 0, :]:
@@ -413,25 +461,33 @@ class LandmarkLocalizer:
                 best_len, best_line = L, (x1, y1, x2, y2)
         if best_line is None:
             return None
+            
         # Lift back to full-frame coords (add roi_y offset on the y component).
         x1, y1, x2, y2 = best_line
         y1 += det["roi_y"]; y2 += det["roi_y"]
         pts = np.float32([[[x1, y1]], [[x2, y2]]])
         warped = cv2.perspectiveTransform(pts, self.H_bev)[:, 0, :]
-        dx = warped[1, 0] - warped[0, 0]
-        dy = warped[1, 1] - warped[0, 1]
-        stripe_angle = math.atan2(dy, dx)            # in kart-relative BEV frame
-        # H_bev outputs kart-relative metres (X=kart's right, Y=kart's forward),
-        # so stripe_angle is a kart-frame angle. Convert to world frame by adding
-        # (prior_heading - π/2). The kart heading is perpendicular to the stripe
-        # (stripe_angle ± π/2 in kart frame); substituting cancels the π/2 and
-        # collapses to:
-        cand_a = stripe_angle + prior_heading
-        cand_b = stripe_angle + prior_heading - math.pi
+        
+        # ─── FIX: REMAP BEV OUTPUT TO YOUR STANDARD KART FRAME ───
+        # H_bev native output assumes: X = right, Y = forward
+        # Your project standard requires: +X = forward, +Y = left
+        dx_kart = warped[1, 1] - warped[0, 1]    # BEV Y is your true forward (+X)
+        dy_kart = -(warped[1, 0] - warped[0, 0]) # BEV X (Right) inverted becomes Left (+Y)
+        
+        # Compute the stripe angle relative to your true forward motion vector
+        stripe_angle = math.atan2(dy_kart, dx_kart)
+        
+        # kart_heading = world_stripe_angle - stripe_angle + pi/2
+        # Two candidates (line is symmetric under +-pi).
+        cand_a = world_stripe_angle_rad - stripe_angle + math.pi / 2
+        cand_b = world_stripe_angle_rad - stripe_angle - math.pi / 2
+        
         # Choose the candidate nearer the VO prior (to resolve the flip).
         def _wrap(a):
             return math.atan2(math.sin(a), math.cos(a))
+            
         prior = _wrap(prior_heading)
         da = abs(_wrap(cand_a - prior))
         db = abs(_wrap(cand_b - prior))
+        
         return _wrap(cand_a if da <= db else cand_b)

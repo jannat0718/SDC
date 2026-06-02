@@ -148,8 +148,10 @@ class GroundPlaneProjector:
         # -- rotate relative offset by kart heading -> world coords
         cos_h = math.cos(heading)
         sin_h = math.sin(heading)
-        det.world_x = kart_x + depth * cos_h - lateral * sin_h
-        det.world_y = kart_y + depth * sin_h + lateral * cos_h
+        #det.world_x = kart_x + depth * cos_h - lateral * sin_h
+        #det.world_y = kart_y + depth * sin_h + lateral * cos_h
+        det.world_x = kart_x + (depth * cos_h) + (lateral * sin_h)
+        det.world_y = kart_y + (depth * sin_h) - (lateral * cos_h)
 
         return det
 

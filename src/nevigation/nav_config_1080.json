@@ -1,0 +1,1057 @@
+{
+  "comment": "Navigation config for 1920x1080 MIDDLE-camera video (data/Middle20260226133416.mp4). Use with camera_K_real.json. H_bev calibrated on this resolution.",
+  "scale_factor": 0.03,
+  "camera_height_m": 0.55,
+  "lidar_angle_offset": 180.0,
+  "kart_geometry": {
+    "comment": "Kart origin (0,0,0) = MID CAMERA optical centre. All pose / kart_x / kart_y / start_pixel / EKF output refer to THIS point. Other parts of the kart are expressed as (x,y,z) offsets from the camera in the kart-body frame: +X = kart forward, +Y = kart left, +Z = up. Heights (z) are measured from ground to the point's centre. All distances in metres.",
+    "length_m": 1.9,
+    "width_m": 1.32,
+    "mid_camera_offset_m": [
+      0.0,
+      0.0,
+      0.55
+    ],
+    "front_bumper_offset_m": [
+      0.65,
+      0.0,
+      0.0
+    ],
+    "rear_bumper_offset_m": [
+      -1.25,
+      0.0,
+      0.0
+    ],
+    "left_side_frame_offset_m": [
+      0.0,
+      0.55,
+      0.0
+    ],
+    "right_side_frame_offset_m": [
+      0.0,
+      -0.55,
+      0.0
+    ],
+    "lidar_offset_m": [
+      0.45,
+      0.0,
+      0.35
+    ],
+    "_lidar_note": "LiDAR is 45 cm in front of camera (+X), on the SAME longitudinal centreline as the camera (Y=0), at 35 cm height. The raw 'from side frame' measurements differ (camera 55 cm, LiDAR 50 cm) ONLY because the kart frame is trapezoidal \u2014 wider at the back, narrower at the front. Both sensors are physically centred. from_front_bumper = 0.65 - 0.45 = 0.20 m.",
+    "_kart_shape_note": "The kart is trapezoidal: rear is the full 1.32 m wide (width_m), front is narrower. The +/-0.55 m side-frame offsets are measured AT THE CAMERA'S fore-aft position (camera is 55 cm from each frame at its location). Use these offsets for geometry checks at the camera/LiDAR fore-aft position only; the rear is wider.",
+    "_raw_measurements": {
+      "mid_camera_from_front_bumper_m": 0.65,
+      "mid_camera_from_side_frame_m": 0.55,
+      "mid_camera_height_m": 0.55,
+      "lidar_from_front_bumper_m": 0.2,
+      "lidar_from_side_frame_m": 0.5,
+      "lidar_in_front_of_mid_camera_m": 0.45,
+      "lidar_height_m": 0.35
+    }
+  },
+  "object_dimensions": {
+    "comment": "Real-world dimensions of objects detected on track. Used by perception for size sanity checks and depth back-projection. All in metres.",
+    "traffic_sign_pole": {
+      "length_m": 1.4,
+      "note": "Pole length only, sign plate excluded."
+    },
+    "cone": {
+      "width_m": 0.29,
+      "depth_m": 0.29,
+      "height_m": 0.5
+    }
+  },
+  "map_world_range_m": 50.0,
+  "track_image_path": "/home/jannat/sdc_2026/src/nevigation/Track.png",
+  "topography_comment": "9360x1410px = 312x47m. Scale=30.0 px/m. World origin=[6795,270]. Kart video start=[1320,915]. Kart faces LEFT.",
+  "start_px": [
+    6795,
+    270
+  ],
+  "px_per_meter": 30.3,
+  "meters_per_pixel": 0.033003300330033,
+  "kart_heading_at_start": "RIGHT (positive X)",
+  "initial_heading_rad": 0.0,
+  "initial_heading_note": "0=+X right, \u03c0/2=+Y up, \u03c0=-X left. VO neutral=\u03c0/2.",
+  "track_info": {
+    "image_w_px": 9360,
+    "image_h_px": 1410,
+    "real_width_m": 312,
+    "real_height_m": 47,
+    "start_pixel": [
+      1320,
+      915
+    ],
+    "end_pixel": [
+      6687,
+      915
+    ]
+  },
+  "homography_comment": "Pixel coords on 9360x1410 Track.png. World coords = metres from world origin [6795,270]. Used for localization verification and drift correction.",
+  "fixed_landmarks": [
+    {
+      "name": "starting_line",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_box": {
+        "x_min": 6690,
+        "x_max": 6690,
+        "y_min": 572,
+        "y_max": 657
+      },
+      "pixel_center": [
+        6690,
+        614
+      ],
+      "world_center": [
+        -3.465,
+        -11.353
+      ],
+      "world_tl": [
+        -3.465,
+        -9.967
+      ],
+      "world_br": [
+        -3.465,
+        -12.772
+      ],
+      "size_m": [
+        0.0,
+        2.833
+      ],
+      "color_bgr": [
+        0,
+        255,
+        0
+      ],
+      "type": "line",
+      "heading_candidates_rad": [
+        3.14159265
+      ],
+      "snap_points": {
+        "3.14159265": [
+          -3.564,
+          -11.551
+        ]
+      },
+      "note": "Start line (upper lane). Kart faces -X (\u03c0). Snaps to start_point world position."
+    },
+    {
+      "name": "end_line",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_box": {
+        "x_min": 6690,
+        "x_max": 6690,
+        "y_min": 872,
+        "y_max": 957
+      },
+      "pixel_center": [
+        6690,
+        914
+      ],
+      "world_center": [
+        -3.465,
+        -21.254
+      ],
+      "world_tl": [
+        -3.465,
+        -19.868
+      ],
+      "world_br": [
+        -3.465,
+        -22.673
+      ],
+      "size_m": [
+        0.0,
+        2.833
+      ],
+      "color_bgr": [
+        0,
+        200,
+        0
+      ],
+      "type": "line",
+      "heading_candidates_rad": [
+        0.0
+      ],
+      "snap_points": {
+        "0.0": [
+          -3.564,
+          -21.287
+        ]
+      },
+      "note": "End line (lower lane). Kart faces +X (0). Snaps to end_point world position."
+    },
+    {
+      "name": "zebra_1",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_box": {
+        "x_min": 3448,
+        "x_max": 3571,
+        "y_min": 573,
+        "y_max": 656
+      },
+      "pixel_center": [
+        3510,
+        614
+      ],
+      "world_center": [
+        -108.416,
+        -11.353
+      ],
+      "world_tl": [
+        -110.462,
+        -10.0
+      ],
+      "world_br": [
+        -106.403,
+        -12.739
+      ],
+      "size_m": [
+        4.067,
+        2.767
+      ],
+      "color_bgr": [
+        0,
+        255,
+        255
+      ],
+      "type": "zebra",
+      "heading_candidates_rad": [
+        3.14159265
+      ],
+      "snap_points": {
+        "3.14159265": [
+          -110.396,
+          -11.551
+        ]
+      },
+      "note": "Zebra 1 - upper lane. Kart faces -X (\u03c0). Snap to west entry edge pixel (3450,620)."
+    },
+    {
+      "name": "zebra_2",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_box": {
+        "x_min": 1770,
+        "x_max": 1890,
+        "y_min": 300,
+        "y_max": 389
+      },
+      "pixel_center": [
+        1830,
+        345
+      ],
+      "world_center": [
+        -163.861,
+        -2.475
+      ],
+      "world_tl": [
+        -165.842,
+        -0.99
+      ],
+      "world_br": [
+        -161.881,
+        -3.927
+      ],
+      "size_m": [
+        4.0,
+        2.9
+      ],
+      "color_bgr": [
+        0,
+        200,
+        255
+      ],
+      "type": "zebra",
+      "heading_candidates_rad": [
+        3.14159265
+      ],
+      "snap_points": {
+        "3.14159265": [
+          -165.842,
+          -2.542
+        ]
+      },
+      "note": "Zebra 2 - upper lane. Kart faces -X (\u03c0). Snap to west entry edge pixel (1770,347)."
+    },
+    {
+      "name": "zebra_3",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_box": {
+        "x_min": 1334,
+        "x_max": 1457,
+        "y_min": 782,
+        "y_max": 960
+      },
+      "pixel_center": [
+        1395,
+        871
+      ],
+      "world_center": [
+        -178.218,
+        -19.835
+      ],
+      "world_tl": [
+        -180.231,
+        -16.898
+      ],
+      "world_br": [
+        -176.172,
+        -22.772
+      ],
+      "size_m": [
+        4.1,
+        5.933
+      ],
+      "color_bgr": [
+        0,
+        165,
+        255
+      ],
+      "type": "zebra",
+      "heading_candidates_rad": [
+        0.0,
+        3.14159265
+      ],
+      "snap_points": {
+        "0.0": [
+          -176.238,
+          -21.287
+        ],
+        "3.14159265": [
+          -180.198,
+          -18.35
+        ]
+      },
+      "note": "Zebra 3 - BIDIRECTIONAL. +X snap pixel (1455,915)=west edge. -X snap pixel (1335,826). lower_line_zebra3_east disambiguates direction."
+    },
+    {
+      "name": "zebra_4",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_box": {
+        "x_min": 3449,
+        "x_max": 3571,
+        "y_min": 871,
+        "y_max": 959
+      },
+      "pixel_center": [
+        3510,
+        915
+      ],
+      "world_center": [
+        -108.416,
+        -21.287
+      ],
+      "world_tl": [
+        -110.429,
+        -19.835
+      ],
+      "world_br": [
+        -106.403,
+        -22.739
+      ],
+      "size_m": [
+        4.067,
+        2.933
+      ],
+      "color_bgr": [
+        255,
+        165,
+        0
+      ],
+      "type": "zebra",
+      "heading_candidates_rad": [
+        0.0
+      ],
+      "snap_points": {
+        "0.0": [
+          -106.436,
+          -21.287
+        ]
+      },
+      "note": "Zebra 4 - lower lane. Kart faces +X (0). Snap to east entry edge pixel (3570,915)."
+    },
+    {
+      "name": "upper_line_after_start",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_box": {
+        "x_min": 4407,
+        "x_max": 4413,
+        "y_min": 575,
+        "y_max": 657
+      },
+      "pixel_center": [
+        4410,
+        615
+      ],
+      "world_center": [
+        -78.713,
+        -11.386
+      ],
+      "world_tl": [
+        -78.812,
+        -10.066
+      ],
+      "world_br": [
+        -78.614,
+        -12.772
+      ],
+      "size_m": [
+        0.2,
+        2.733
+      ],
+      "color_bgr": [
+        255,
+        0,
+        128
+      ],
+      "type": "line",
+      "heading_candidates_rad": [
+        3.14159265
+      ],
+      "snap_points": {
+        "3.14159265": [
+          -78.713,
+          -11.386
+        ]
+      },
+      "note": "Upper lane midpoint line. Kart faces -X (\u03c0). Between starting_line and zebra_1."
+    },
+    {
+      "name": "lower_line_before_end",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_box": {
+        "x_min": 4407,
+        "x_max": 4413,
+        "y_min": 875,
+        "y_max": 957
+      },
+      "pixel_center": [
+        4410,
+        915
+      ],
+      "world_center": [
+        -78.713,
+        -21.287
+      ],
+      "world_tl": [
+        -78.812,
+        -19.967
+      ],
+      "world_br": [
+        -78.614,
+        -22.673
+      ],
+      "size_m": [
+        0.2,
+        2.733
+      ],
+      "color_bgr": [
+        128,
+        0,
+        255
+      ],
+      "type": "line",
+      "heading_candidates_rad": [
+        0.0
+      ],
+      "snap_points": {
+        "0.0": [
+          -78.713,
+          -21.287
+        ]
+      },
+      "note": "Lower lane midpoint line. Kart faces +X (0). Between zebra_4 and end_line."
+    },
+    {
+      "name": "lower_line_zebra3_east",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_box": {
+        "x_min": 1312,
+        "x_max": 1318,
+        "y_min": 875,
+        "y_max": 957
+      },
+      "pixel_center": [
+        1315,
+        916
+      ],
+      "world_center": [
+        -180.858,
+        -21.32
+      ],
+      "world_tl": [
+        -180.957,
+        -19.967
+      ],
+      "world_br": [
+        -180.759,
+        -22.673
+      ],
+      "size_m": [
+        0.2,
+        2.733
+      ],
+      "color_bgr": [
+        0,
+        128,
+        255
+      ],
+      "type": "line",
+      "heading_candidates_rad": [
+        0.0
+      ],
+      "snap_points": {
+        "0.0": [
+          -180.858,
+          -21.32
+        ]
+      },
+      "note": "East of zebra_3, lower lane. If detected -> kart +X toward zebra_3. If not detected -> kart -X return."
+    },
+    {
+      "name": "lower_lane_midpoint1_proximity",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        1815,
+        915
+      ],
+      "world_center": [
+        -164.356,
+        -21.287
+      ],
+      "color_bgr": [
+        0,
+        255,
+        128
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.0,
+      "heading_candidates_rad": [
+        0.0
+      ],
+      "snap_points": {
+        "0.0": [
+          -164.356,
+          -21.287
+        ]
+      },
+      "note": "Lower lane proximity snap. +X direction. Kart within 1.25m of (-166,-21.5) snaps position and resets heading to 0.0. Pixel (1815,915)."
+    },
+    {
+      "name": "lower_lane_midpoint2_proximity",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        2015,
+        915
+      ],
+      "world_center": [
+        -157.756,
+        -21.287
+      ],
+      "color_bgr": [
+        0,
+        220,
+        128
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.0,
+      "heading_candidates_rad": [
+        0.0
+      ],
+      "snap_points": {
+        "0.0": [
+          -157.755,
+          -21.287
+        ]
+      },
+      "note": "Lower lane proximity snap. +X direction. Kart within 2m of (-159.333,-21.5) snaps position and resets heading to 0.0. Pixel (2015,915)."
+    },
+    {
+      "name": "lower_lane_mid3_proximity",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        2315,
+        915
+      ],
+      "world_center": [
+        -147.855,
+        -21.287
+      ],
+      "color_bgr": [
+        0,
+        200,
+        128
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.0,
+      "heading_candidates_rad": [
+        0.0
+      ],
+      "snap_points": {
+        "0.0": [
+          -147.854,
+          -21.287
+        ]
+      },
+      "note": "Lower lane proximity snap. +X direction. Kart within 2m of (-149.333,-21.5) snaps position and resets heading to 0.0. Pixel (2315,915)."
+    },
+    {
+      "name": "lower_lane_mid4_proximity",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        2825,
+        915
+      ],
+      "world_center": [
+        -131.023,
+        -21.287
+      ],
+      "color_bgr": [
+        0,
+        180,
+        128
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.0,
+      "heading_candidates_rad": [
+        0.0
+      ],
+      "snap_points": {
+        "0.0": [
+          -131.023,
+          -21.287
+        ]
+      },
+      "note": "Lower lane proximity snap. +X direction. Kart within 2m of (-132.333,-21.5) snaps position and resets heading to 0.0. Pixel (2825,915)."
+    },
+    {
+      "name": "lower_lane_mid5_proximity",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        3225,
+        915
+      ],
+      "world_center": [
+        -117.822,
+        -21.287
+      ],
+      "color_bgr": [
+        0,
+        160,
+        128
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.0,
+      "heading_candidates_rad": [
+        0.0
+      ],
+      "snap_points": {
+        "0.0": [
+          -117.822,
+          -21.287
+        ]
+      },
+      "note": "Lower lane proximity snap. +X direction. Kart within 2m of (-119.0,-21.5) snaps position and resets heading to 0.0. Pixel (3225,915)."
+    },
+    {
+      "name": "Lower_Upper_lane_1_proximity",
+      "world_stripe_angle_rad": 1.5707963267948966,
+      "pixel_center": [
+        1680,
+        680
+      ],
+      "world_center": [
+        -168.812,
+        -13.531
+      ],
+      "color_bgr": [
+        128,
+        0,
+        255
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 3.0,
+      "heading_candidates_rad": [
+        1.5707963267948966
+      ],
+      "snap_points": {
+        "1.5707963267948966": [
+          -168.812,
+          -13.531
+        ]
+      },
+      "note": "Lower-to-upper connecting lane proximity snap. Kart drives +Y (heading = \u03c0/2 = 90\u00b0, 'north' on map). Within 2m of (-169.833,-15.667) snaps position and resets heading to \u03c0/2. Pixel (1680,680). Stripes parallel to lane (along \u00b1Y), so world_stripe_angle_rad = \u03c0/2."
+    },
+    {
+      "name": "upper_lane_west_1_proximity",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        1300,
+        350
+      ],
+      "world_center": [
+        -181.353,
+        -2.64
+      ],
+      "color_bgr": [
+        200,
+        200,
+        0
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.5,
+      "heading_candidates_rad": [
+        3.141592653589793
+      ],
+      "snap_points": {
+        "3.141592653589793": [
+          -181.353,
+          -2.641
+        ]
+      },
+      "note": "Upper lane proximity snap heading -X (\u03c0, 180\u00b0). Pixel (1300,350). Kart within 2m snaps to (-183.167,-2.667)."
+    },
+    {
+      "name": "upper_lane_west_2_proximity",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        1000,
+        450
+      ],
+      "world_center": [
+        -191.254,
+        -5.941
+      ],
+      "color_bgr": [
+        200,
+        200,
+        0
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.5,
+      "heading_candidates_rad": [
+        3.141592653589793
+      ],
+      "snap_points": {
+        "3.141592653589793": [
+          -191.254,
+          -5.941
+        ]
+      },
+      "note": "Upper lane proximity snap heading -X (\u03c0, 180\u00b0). Pixel (1000,450). Kart within 2m snaps to (-193.167,-6.0)."
+    },
+    {
+      "name": "upper_lane_west_3_proximity",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        700,
+        350
+      ],
+      "world_center": [
+        -201.155,
+        -2.64
+      ],
+      "color_bgr": [
+        200,
+        200,
+        0
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.5,
+      "heading_candidates_rad": [
+        3.141592653589793
+      ],
+      "snap_points": {
+        "3.141592653589793": [
+          -201.155,
+          -2.641
+        ]
+      },
+      "note": "Upper lane proximity snap heading -X (\u03c0, 180\u00b0). Pixel (700,350). Kart within 2m snaps to (-203.167,-2.667)."
+    },
+    {
+      "name": "west_bend_1_proximity",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        500,
+        350
+      ],
+      "world_center": [
+        -207.756,
+        -2.64
+      ],
+      "color_bgr": [
+        200,
+        100,
+        0
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.5,
+      "heading_candidates_rad": [
+        3.9269908169872414
+      ],
+      "snap_points": {
+        "3.9269908169872414": [
+          -207.755,
+          -2.641
+        ]
+      },
+      "note": "West-end bend proximity snap, transitioning from -X to -Y direction. Heading set to 225\u00b0 (5\u03c0/4 rad, geometric midpoint of -X and -Y). Pixel (500,350)."
+    },
+    {
+      "name": "west_bend_3_proximity",
+      "world_stripe_angle_rad": 1.5707963267948966,
+      "pixel_center": [
+        380,
+        615
+      ],
+      "world_center": [
+        -211.716,
+        -11.386
+      ],
+      "color_bgr": [
+        200,
+        100,
+        0
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.5,
+      "heading_candidates_rad": [
+        4.71238898038469
+      ],
+      "snap_points": {
+        "4.71238898038469": [
+          -211.716,
+          -11.386
+        ]
+      },
+      "note": "West-side connecting-lane proximity snap, heading -Y (3\u03c0/2 rad, 270\u00b0). Stripes along lane (\u00b1Y) so world_stripe_angle_rad = \u03c0/2. Pixel (380,615)."
+    },
+    {
+      "name": "west_bend_5_proximity",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        525,
+        900
+      ],
+      "world_center": [
+        -206.931,
+        -20.792
+      ],
+      "color_bgr": [
+        200,
+        100,
+        0
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.5,
+      "heading_candidates_rad": [
+        5.759586531581287
+      ],
+      "snap_points": {
+        "5.759586531581287": [
+          -206.931,
+          -20.792
+        ]
+      },
+      "note": "West-end bend proximity snap, heading 330\u00b0 (11\u03c0/6 rad), almost aligned with +X. Pixel (525,900)."
+    },
+    {
+      "name": "lower_lane_west_1_proximity",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        615,
+        915
+      ],
+      "world_center": [
+        -203.96,
+        -21.287
+      ],
+      "color_bgr": [
+        0,
+        140,
+        128
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.5,
+      "heading_candidates_rad": [
+        0.0
+      ],
+      "snap_points": {
+        "0.0": [
+          -203.96,
+          -21.287
+        ]
+      },
+      "note": "Lower lane (west end) proximity snap heading +X (0\u00b0). Pixel (615,915)."
+    },
+    {
+      "name": "lower_lane_west_2_proximity",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        915,
+        915
+      ],
+      "world_center": [
+        -194.059,
+        -21.287
+      ],
+      "color_bgr": [
+        0,
+        140,
+        128
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.5,
+      "heading_candidates_rad": [
+        0.0
+      ],
+      "snap_points": {
+        "0.0": [
+          -194.059,
+          -21.287
+        ]
+      },
+      "note": "Lower lane proximity snap heading +X (0\u00b0). Pixel (915,915)."
+    },
+    {
+      "name": "lower_lane_west_3_proximity",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        1115,
+        915
+      ],
+      "world_center": [
+        -187.459,
+        -21.287
+      ],
+      "color_bgr": [
+        0,
+        140,
+        128
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.5,
+      "heading_candidates_rad": [
+        0.0
+      ],
+      "snap_points": {
+        "0.0": [
+          -187.458,
+          -21.287
+        ]
+      },
+      "note": "Lower lane proximity snap heading +X (0\u00b0). Pixel (1115,915)."
+    },
+    {
+      "name": "start_point",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        1300,
+        925
+      ],
+      "world_center": [
+        -181.353,
+        -21.617
+      ],
+      "color_bgr": [
+        0,
+        255,
+        0
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.0,
+      "heading_candidates_rad": [
+        0.3490658503988659
+      ],
+      "snap_points": {
+        "0.3490658503988659": [
+          -181.353,
+          -21.617
+        ]
+      },
+      "note": "Kart start position (matches test_map_video.py START_PIXEL/START_THETA). Heading 20\u00b0 (0.3491 rad, math.radians(20), NE between +X and +Y). Within 2m of (-183.167,-21.833) snaps position and resets heading. Pixel (1300,925)."
+    },
+    {
+      "name": "end_point",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        6687,
+        915
+      ],
+      "world_center": [
+        -3.564,
+        -21.287
+      ],
+      "color_bgr": [
+        0,
+        100,
+        0
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 2.0,
+      "heading_candidates_rad": [
+        0.0
+      ],
+      "snap_points": {
+        "0.0": [
+          -3.564,
+          -21.287
+        ]
+      },
+      "note": "Kart end position. Lower lane proximity snap heading +X (0\u00b0, 360\u00b0). Within 2m of (-3.6,-21.5) snaps position and resets heading to 0. Pixel (6687,915)."
+    },
+    {
+      "name": "yield_triangles",
+      "world_stripe_angle_rad": 0.0,
+      "pixel_center": [
+        1588,
+        390
+      ],
+      "world_center": [
+        -171.848,
+        -3.96
+      ],
+      "color_bgr": [
+        255,
+        255,
+        0
+      ],
+      "type": "proximity_snap",
+      "snap_radius_m": 3.0,
+      "heading_candidates_rad": [
+        2.356194490192345
+      ],
+      "snap_points": {
+        "2.356194490192345": [
+          -171.849,
+          -3.96
+        ]
+      },
+      "note": "Yield triangle markers - upper-lane bend. Kart heading 135\u00b0 (3\u03c0/4 rad, NW between +Y and -X) at this bend. Within 2m of (-173.567,-4.0) snaps position and resets heading. Original five marker pixels: (1665,390)(1610,390)(1585,390)(1555,390)(1525,390)."
+    }
+  ],
+  "H_bev_comment": "BEV homography for the MIDDLE camera at 1920x1080. IMPORTANT: apply cv2.undistort() with camera_K_real.json BEFORE applying H_bev. Calibrated 2026-05-23 from zebra_4 at frame 5400 of data/Middle20260226133416.mp4. Output BEV scale = 100 px/m (1 px = 1 cm).",
+  "H_bev": [
+    [
+      -0.09372956176610962,
+      -0.9623485908797499,
+      517.6584037839258
+    ],
+    [
+      0.18985033869288145,
+      -3.491612534827568,
+      1548.3924624372135
+    ],
+    [
+      0.00013438796091744942,
+      -0.002572186920155969,
+      1.0
+    ]
+  ],
+  "px_per_meter_bev": 100.0,
+  "video_resolution": [
+    1920,
+    1080
+  ]
+}

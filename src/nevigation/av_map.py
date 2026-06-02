@@ -33,6 +33,8 @@ CONFIG:
     - world_pts / image_pts (from homography calibration)
 """
 
+from turtle import heading
+
 import cv2
 import math
 import numpy as np
@@ -129,9 +131,18 @@ class CameraCalibration:
 
         self.K    = self.cam.K
         self.dist = self.cam.dist
+        self._map1 = None
+        self._map2 = None
 
     def undistort(self, frame: np.ndarray) -> np.ndarray:
-        return cv2.undistort(frame, self.K, self.dist)
+        # Build the undistortion map once, then reuse it. cv2.remap with a
+        # precomputed map is ~5-10x faster than cv2.undistort (which rebuilds
+        # the map on every call).
+        if self._map1 is None:
+            h, w = frame.shape[:2]
+            self._map1, self._map2 = cv2.initUndistortRectifyMap(
+                self.K, self.dist, None, self.K, (w, h), cv2.CV_16SC2)
+        return cv2.remap(frame, self._map1, self._map2, cv2.INTER_LINEAR)
 
 # ─────────────────────────────────────────────
 # MODULE 2 — VISUAL ODOMETRY
@@ -203,7 +214,8 @@ class VisualOdometry:
         # Reseed _R_cum consistent with heading h.
         # heading = raw_yaw + π/2  →  raw_yaw = h - π/2
         # Do NOT use np.eye(3) — identity encodes VO-neutral = 90°.
-        _raw = h - math.pi / 2
+        #_raw = h - math.pi / 2
+        _raw = math.pi / 2 - h
         _c, _s = math.cos(_raw), math.sin(_raw)
         self._R_cum = np.array([[_c, 0, _s], [0, 1, 0], [-_s, 0, _c]])
 
@@ -286,6 +298,12 @@ class VisualOdometry:
         # 2. Update heading
         self._R_cum = R_inc @ self._R_cum
         raw_yaw = np.arctan2(self._R_cum[0, 2], self._R_cum[2, 2])
+        # Yaw sign inversion: cv2.recoverPose returns rotation in the camera
+        # convention (right-hand rule about camera Y-down), which is opposite
+        # to our world convention (CCW positive about world Z-up). A physical
+        # right turn (clockwise from above) was being added to heading instead
+        # of subtracted, sending the kart off-track. Negate raw_yaw to fix.
+        raw_yaw = -raw_yaw
         #self.pose.heading = (raw_yaw + math.pi) % (2 * math.pi)  # map forward = -X
         #self.pose.heading = (raw_yaw + math.pi / 2) % (2 * math.pi)  # map forward = +Y
         raw = raw_yaw + math.pi / 2
@@ -366,15 +384,26 @@ class ObjectProjector:
                 else self.ground_plane_depth(obj.bbox)
         obj.depth = depth
 
-        # Back-project to camera frame
-        cam_x = (bx - self.cx) * depth / self.fx
-        cam_z = depth
+        # Back-project to camera frame.
+        # Negated: image-pixel x increases rightward, but in the world frame
+        # used by this projection (right turn = +heading clockwise per the
+        # yaw-sign fix in VisualOdometry), "right of camera" maps to the
+        # negative of the lateral offset. Without this negation the
+        # projected world point appears mirrored left/right on the map.
+        cam_x = -(bx - self.cx) * depth / self.fx
+        #cam_z = depth
 
-        cam_pt   = np.array([[cam_x], [0.0], [cam_z]])
-        world_pt = pose.R.T @ cam_pt - pose.R.T @ pose.t
+        #cam_pt   = np.array([[cam_x], [0.0], [cam_z]])
+        #world_pt = pose.R.T @ cam_pt - pose.R.T @ pose.t
 
-        obj.world_x = float(world_pt[0]) + pose.x
-        obj.world_y = float(world_pt[2]) + pose.y
+        #obj.world_x = float(world_pt[0]) + pose.x
+        #obj.world_y = float(world_pt[2]) + pose.y
+
+        # Standard trig projection based on your standard heading (+X=0, +Y=90)
+        # Depth is forward distance, cam_x is lateral (right) distance
+        obj.world_x = pose.x + (depth * math.cos(pose.heading)) - (cam_x * math.sin(pose.heading))
+        obj.world_y = pose.y + (depth * math.sin(pose.heading)) + (cam_x * math.cos(pose.heading))
+        
         return obj
 
 # ─────────────────────────────────────────────
@@ -558,8 +587,10 @@ class TrackMapper:
         # Kart icon — filled circle + heading arrow, deep red
         kx, ky = self.world_to_pixel(pose.x, pose.y)
         if 0 <= kx < self.map_w and 0 <= py < self.map_h:
-            ex = int(kx + 22 * np.sin(pose.heading))
-            ey = int(ky - 22 * np.cos(pose.heading))
+            #ex = int(kx + 22 * np.sin(pose.heading))
+            ex = int(kx + 22 * math.cos(pose.heading))
+            #ey = int(ky - 22 * np.cos(pose.heading))
+            ey = int(ky - 22 * math.sin(pose.heading))
             cv2.circle(frame, (kx, ky), 11, (0, 0, 139), -1)
             cv2.circle(frame, (kx, ky), 11, (0, 0, 80), 2)
             cv2.arrowedLine(frame, (kx, ky), (ex, ey),
@@ -924,7 +955,8 @@ class NavigationPipeline:
 
         # Seed _R_cum so VO heading is consistent with _h0.
         # VO computes heading = raw_yaw + π/2, so raw_yaw = _h0 - π/2.
-        _raw_yaw = _h0 - math.pi / 2
+        #_raw_yaw = _h0 - math.pi / 2
+        _raw_yaw = math.pi / 2 - _h0
         _c, _s = math.cos(_raw_yaw), math.sin(_raw_yaw)
         self.vo._R_cum = np.array([[_c, 0, _s], [0, 1, 0], [-_s, 0, _c]])
 
@@ -1041,7 +1073,8 @@ class NavigationPipeline:
                     # Without this, _R_cum diverges from pose.heading during stopped frames,
                     # causing a heading jump when movement resumes.
                     _h = _saved_heading                    # Seeds _R_cum from true saved heading
-                    _raw = _h - math.pi / 2
+                    #_raw = _h - math.pi / 2
+                    _raw = math.pi / 2 - _h
                     _c, _s = math.cos(_raw), math.sin(_raw)
                     self.vo._R_cum = np.array([[_c, 0, _s], [0, 1, 0], [-_s, 0, _c]])
                     pose = self.vo.pose
@@ -1094,7 +1127,8 @@ class NavigationPipeline:
                         # DO NOT use np.eye(3) — identity encodes heading=90° (VO neutral),
                         # corrupting the heading on the very next frame.
                         _h = self.vo.pose.heading
-                        _raw = _h - math.pi / 2
+                        #_raw = _h - math.pi / 2
+                        _raw = math.pi / 2 - _h
                         _c, _s = math.cos(_raw), math.sin(_raw)
                         self.vo._R_cum = np.array([[_c, 0, _s], [0, 1, 0], [-_s, 0, _c]])
                         # Re-anchor trajectory so the corrected jump doesn't
@@ -1126,7 +1160,8 @@ class NavigationPipeline:
                     if prox_snap.heading_rad is not None:
                         self.vo.pose.heading = prox_snap.heading_rad
                     _h = self.vo.pose.heading
-                    _raw = _h - math.pi / 2
+                    #_raw = _h - math.pi / 2
+                    _raw = math.pi / 2 - _h
                     _c, _s = math.cos(_raw), math.sin(_raw)
                     self.vo._R_cum = np.array([[_c, 0, _s], [0, 1, 0], [-_s, 0, _c]])
                     self.vo.trajectory.append((prox_snap.world_x, prox_snap.world_y))
